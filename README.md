@@ -25,7 +25,9 @@ Compared to [chef-zero](https://github.com/chef/chef-zero), cinc-zero treats
 | Cookbooks + sandboxes + file store (upload/download, `_latest`, `_recipes`) | ✅ |
 | Cookbook artifacts + `/universe` | ✅ |
 | Search (in-process Solr query engine + Chef document expander) | ✅ |
-| Authz groups / containers, chef-repo loader | ⏳ planned |
+| Authz groups / containers (structural) | ✅ |
+| ACL endpoints (`_acl`, permissive/structural) | ✅ |
+| chef-repo loader | ⏳ planned |
 
 See [`docs/superpowers/specs`](docs/superpowers/specs) for the full design.
 
