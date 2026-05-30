@@ -4,6 +4,8 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -130,5 +132,32 @@ func TestDisableAuthAllowsUnsigned(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		t.Fatalf("DisableAuth unsigned = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestServerLoadsRepo(t *testing.T) {
+	dir := t.TempDir()
+	nodes := filepath.Join(dir, "nodes")
+	if err := os.MkdirAll(nodes, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nodes, "web01.json"),
+		[]byte(`{"name":"web01","chef_environment":"prod"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := startServer(t, Options{Orgs: []string{"acme"}, DisableAuth: true, Repo: dir})
+
+	resp, err := http.Get(srv.URL() + "/organizations/acme/nodes/web01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("loaded node GET = %d, want 200", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "prod") {
+		t.Fatalf("loaded node body = %s", body)
 	}
 }

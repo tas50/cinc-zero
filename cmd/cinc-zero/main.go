@@ -44,6 +44,7 @@ func run(args []string, out io.Writer) error {
 	admin := fs.String("admin", "pivotal", "bootstrap admin user name")
 	keyFile := fs.String("key-out", "", "write the admin private key to this file")
 	noAuth := fs.Bool("no-auth", false, "disable request signature verification")
+	repoPath := fs.String("repo", "", "path to a chef-repo to load into the first org at startup")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -53,6 +54,7 @@ func run(args []string, out io.Writer) error {
 		Orgs:        splitCSV(*orgsCSV),
 		AdminName:   *admin,
 		DisableAuth: *noAuth,
+		Repo:        *repoPath,
 	})
 	if err != nil {
 		return err
@@ -70,6 +72,9 @@ func run(args []string, out io.Writer) error {
 	fmt.Fprintf(out, "cinc-zero listening on %s\n", srv.URL())
 	fmt.Fprintf(out, "  orgs: %s\n  admin user: %s (auth %s)\n",
 		*orgsCSV, srv.AdminName(), authState(*noAuth))
+	if *repoPath != "" {
+		fmt.Fprintf(out, "  loaded chef-repo from %s\n", *repoPath)
+	}
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
