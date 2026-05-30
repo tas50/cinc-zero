@@ -29,6 +29,7 @@ Compared to [chef-zero](https://github.com/chef/chef-zero), cinc-zero treats
 | ACL endpoints (`_acl`, permissive/structural) | ✅ |
 | Key management API (client/user named keys, v1) | ✅ |
 | `authenticate_user`, user↔org association | ✅ |
+| Environment/role sub-endpoints (cookbook filtering, depsolve, recipes, nodes, run lists) | ✅ |
 | chef-repo loader | ⏳ planned |
 
 See [`docs/superpowers/specs`](docs/superpowers/specs) for the full design.
