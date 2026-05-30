@@ -23,7 +23,7 @@ Compared to [chef-zero](https://github.com/chef/chef-zero), cinc-zero treats
 | Multi-org + organization management API | ✅ |
 | Embeddable library, standalone binary, Docker image | ✅ |
 | Cookbooks + sandboxes + file store (upload/download, `_latest`, `_recipes`) | ✅ |
-| Cookbook artifacts + `/universe` | ⏳ planned |
+| Cookbook artifacts + `/universe` | ✅ |
 | Search (Bleve + Chef expander) | ⏳ planned |
 | Authz groups / containers, chef-repo loader | ⏳ planned |
 
