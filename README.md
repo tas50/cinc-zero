@@ -68,3 +68,7 @@ go test ./... -race -cover
 Authentication golden vectors under `internal/auth/testdata` are generated from
 the real `mixlib-authentication` gem via `ruby gen_vectors.rb`, guaranteeing
 byte-for-byte compatibility with Chef clients.
+
+## License
+
+cinc-zero is licensed under the [Business Source License 1.1](LICENSE).
