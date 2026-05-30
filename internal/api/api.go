@@ -45,7 +45,8 @@ func (a *API) Handler() http.Handler {
 	a.registerPolicyRoutes(mux)
 	a.registerOrganizationRoutes(mux)
 	a.registerAuthzRoutes(mux)
-	return mux
+	a.registerServerEndpoints(mux)
+	return withAPIVersion(mux)
 }
 
 // org resolves the {org} path value to its store, writing a 404 and returning
