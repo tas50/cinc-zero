@@ -19,7 +19,11 @@ import (
 // request (except unauthenticated system paths) before delegating to next.
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if api.SystemPaths[r.URL.Path] {
+		// System paths (e.g. /_status) and the cookbook file store are
+		// unauthenticated: in real Chef the sandbox hands back pre-signed
+		// bookshelf URLs that clients PUT/GET without Mixlib signing, so the
+		// file store must accept those requests directly.
+		if api.SystemPaths[r.URL.Path] || isFileStorePath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -78,6 +82,13 @@ func unauthorized(w http.ResponseWriter, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnauthorized)
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": []string{msg}})
+}
+
+// isFileStorePath reports whether path addresses the cookbook file store
+// (/organizations/{org}/file_store/{checksum}), which is served without auth.
+func isFileStorePath(path string) bool {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	return len(parts) == 4 && parts[0] == "organizations" && parts[2] == "file_store"
 }
 
 // orgFromPath extracts the organization name from an "/organizations/{org}/..."
