@@ -24,7 +24,7 @@ Compared to [chef-zero](https://github.com/chef/chef-zero), cinc-zero treats
 | Embeddable library, standalone binary, Docker image | ✅ |
 | Cookbooks + sandboxes + file store (upload/download, `_latest`, `_recipes`) | ✅ |
 | Cookbook artifacts + `/universe` | ✅ |
-| Search (Bleve + Chef expander) | ⏳ planned |
+| Search (in-process Solr query engine + Chef document expander) | ✅ |
 | Authz groups / containers, chef-repo loader | ⏳ planned |
 
 See [`docs/superpowers/specs`](docs/superpowers/specs) for the full design.
