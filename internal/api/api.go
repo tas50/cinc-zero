@@ -35,6 +35,7 @@ func (a *API) Handler() http.Handler {
 	a.registerDataBagRoutes(mux)
 	a.registerPolicyRoutes(mux)
 	a.registerOrganizationRoutes(mux)
+	a.registerAuthzRoutes(mux)
 	return mux
 }
 

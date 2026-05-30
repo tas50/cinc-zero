@@ -16,6 +16,7 @@ func SeedOrg(org *store.Org) {
 	if _, ok := org.Get("environments", "_default"); !ok {
 		org.Put("environments", "_default", []byte(defaultEnvironment))
 	}
+	seedAuthz(org)
 }
 
 // registerEnvironmentRoutes wires environments using the generic object CRUD
