@@ -1,0 +1,148 @@
+package api
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+
+	"github.com/tas50/cinc-zero/internal/auth"
+	"github.com/tas50/cinc-zero/internal/store"
+)
+
+// orgsColl is the global collection holding organization metadata
+// ({name, full_name, guid}).
+const orgsColl = "organizations"
+
+func (a *API) registerOrganizationRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /organizations", a.listOrganizations)
+	mux.HandleFunc("POST /organizations", a.createOrganization)
+	mux.HandleFunc("GET /organizations/{org}", a.getOrganization)
+	mux.HandleFunc("PUT /organizations/{org}", a.putOrganization)
+	mux.HandleFunc("DELETE /organizations/{org}", a.deleteOrganization)
+}
+
+// CreateOrganization provisions a new organization: it creates the org in the
+// store, seeds the _default environment, registers org metadata, and creates
+// the "<name>-validator" client. It returns the validator's PEM-encoded private
+// key, which Chef returns exactly once at creation time. This helper is shared
+// by the POST handler and the server bootstrap.
+func CreateOrganization(st *store.Store, name, fullName string) ([]byte, error) {
+	org, err := st.CreateOrg(name)
+	if err != nil {
+		return nil, err
+	}
+	SeedOrg(org)
+
+	guid, err := randomGUID()
+	if err != nil {
+		return nil, err
+	}
+	meta := map[string]any{"name": name, "full_name": fullName, "guid": guid}
+	st.Global().Put(orgsColl, name, mustEncode(meta))
+
+	key, err := auth.GenerateKey()
+	if err != nil {
+		return nil, err
+	}
+	pubPEM, err := auth.EncodePublicKeyPEM(&key.PublicKey)
+	if err != nil {
+		return nil, err
+	}
+	validator := name + "-validator"
+	clientDoc := fmt.Sprintf(`{"name":%q,"clientname":%q,"validator":true,"public_key":%q}`,
+		validator, validator, string(pubPEM))
+	org.Put("clients", validator, []byte(clientDoc))
+
+	return auth.EncodePrivateKeyPEM(key), nil
+}
+
+func randomGUID() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b[:]), nil
+}
+
+func (a *API) listOrganizations(w http.ResponseWriter, r *http.Request) {
+	out := map[string]string{}
+	for _, name := range a.store.Global().Keys(orgsColl) {
+		out[name] = requestBaseURL(r) + "/organizations/" + name
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (a *API) createOrganization(w http.ResponseWriter, r *http.Request) {
+	var obj map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&obj); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	name, _ := obj["name"].(string)
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "Field 'name' missing")
+		return
+	}
+	fullName, _ := obj["full_name"].(string)
+
+	priv, err := CreateOrganization(a.store, name, fullName)
+	if errors.Is(err, store.ErrConflict) {
+		writeError(w, http.StatusConflict, "Organization already exists")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"clientname":  name + "-validator",
+		"private_key": string(priv),
+		"uri":         requestBaseURL(r) + "/organizations/" + name,
+	})
+}
+
+func (a *API) getOrganization(w http.ResponseWriter, r *http.Request) {
+	raw, ok := a.store.Global().Get(orgsColl, r.PathValue("org"))
+	if !ok {
+		writeError(w, http.StatusNotFound, "Cannot find org "+r.PathValue("org"))
+		return
+	}
+	writeRaw(w, http.StatusOK, raw)
+}
+
+func (a *API) putOrganization(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("org")
+	raw, ok := a.store.Global().Get(orgsColl, name)
+	if !ok {
+		writeError(w, http.StatusNotFound, "Cannot find org "+name)
+		return
+	}
+	var meta map[string]any
+	json.Unmarshal(raw, &meta)
+
+	var update map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if fn, ok := update["full_name"].(string); ok {
+		meta["full_name"] = fn
+	}
+	encoded := mustEncode(meta)
+	a.store.Global().Put(orgsColl, name, encoded)
+	writeRaw(w, http.StatusOK, encoded)
+}
+
+func (a *API) deleteOrganization(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("org")
+	raw, ok := a.store.Global().Delete(orgsColl, name)
+	if !ok {
+		writeError(w, http.StatusNotFound, "Cannot find org "+name)
+		return
+	}
+	a.store.DeleteOrg(name)
+	writeRaw(w, http.StatusOK, raw)
+}

@@ -62,13 +62,14 @@ func (o *Options) withDefaults() {
 
 // Server is a running (or ready-to-run) cinc-zero instance.
 type Server struct {
-	opts     Options
-	store    *store.Store
-	handler  http.Handler
-	httpSrv  *http.Server
-	listener net.Listener
-	adminKey []byte // PEM-encoded admin private key
-	url      string
+	opts          Options
+	store         *store.Store
+	handler       http.Handler
+	httpSrv       *http.Server
+	listener      net.Listener
+	adminKey      []byte            // PEM-encoded admin private key
+	validatorKeys map[string][]byte // org name -> PEM-encoded validator private key
+	url           string
 }
 
 // New builds a Server: it creates the store, bootstraps the admin user and the
@@ -90,18 +91,20 @@ func New(opts Options) (*Server, error) {
 	adminDoc := fmt.Sprintf(`{"username":%q,"admin":true,"public_key":%q}`, opts.AdminName, string(pubPEM))
 	st.Global().Put("users", opts.AdminName, []byte(adminDoc))
 
+	validatorKeys := make(map[string][]byte, len(opts.Orgs))
 	for _, name := range opts.Orgs {
-		org, err := st.CreateOrg(name)
+		validator, err := api.CreateOrganization(st, name, name)
 		if err != nil {
 			return nil, fmt.Errorf("create org %q: %w", name, err)
 		}
-		api.SeedOrg(org)
+		validatorKeys[name] = validator
 	}
 
 	s := &Server{
-		opts:     opts,
-		store:    st,
-		adminKey: auth.EncodePrivateKeyPEM(key),
+		opts:          opts,
+		store:         st,
+		adminKey:      auth.EncodePrivateKeyPEM(key),
+		validatorKeys: validatorKeys,
 	}
 	handler := api.New(st).Handler()
 	if !opts.DisableAuth {
@@ -146,6 +149,11 @@ func (s *Server) AdminKey() []byte { return s.adminKey }
 
 // AdminName returns the bootstrap admin user name.
 func (s *Server) AdminName() string { return s.opts.AdminName }
+
+// ValidatorKey returns the PEM-encoded private key for an organization's
+// "<org>-validator" client, or nil if the org was not created at bootstrap.
+// This is the key chef-client uses to register new nodes.
+func (s *Server) ValidatorKey(org string) []byte { return s.validatorKeys[org] }
 
 // Store exposes the underlying store for programmatic seeding and inspection.
 func (s *Server) Store() *store.Store { return s.store }

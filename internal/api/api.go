@@ -34,6 +34,7 @@ func (a *API) Handler() http.Handler {
 	a.registerActorRoutes(mux, "/", "users", globalScope)
 	a.registerDataBagRoutes(mux)
 	a.registerPolicyRoutes(mux)
+	a.registerOrganizationRoutes(mux)
 	return mux
 }
 
