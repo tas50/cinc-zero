@@ -144,6 +144,25 @@ func TestConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 
+func TestGlobalSpaceIsStableAndSeparate(t *testing.T) {
+	s := New()
+	g := s.Global()
+	if g == nil {
+		t.Fatal("Global returned nil")
+	}
+	if s.Global() != g {
+		t.Fatal("Global should return the same instance")
+	}
+	g.Put("users", "admin", []byte(`{"name":"admin"}`))
+	org, _ := s.CreateOrg("acme")
+	if _, ok := org.Get("users", "admin"); ok {
+		t.Fatal("global users must not leak into orgs")
+	}
+	if got, ok := g.Get("users", "admin"); !ok || string(got) != `{"name":"admin"}` {
+		t.Fatal("global value not retrievable")
+	}
+}
+
 func TestOrgsAreIsolated(t *testing.T) {
 	s := New()
 	a, _ := s.CreateOrg("a")

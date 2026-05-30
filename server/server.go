@@ -1,0 +1,167 @@
+// Package server assembles the in-memory store, the Chef API handlers, and the
+// authentication layer into a runnable, embeddable Chef Infra Server. It is the
+// public entry point for Go test suites:
+//
+//	srv, _ := server.New(server.Options{Orgs: []string{"test"}})
+//	srv.Start()
+//	defer srv.Stop(context.Background())
+//	// talk to srv.URL() with a client signed by srv.AdminKey()
+package server
+
+import (
+	"context"
+	"crypto/rsa"
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"time"
+
+	"github.com/tas50/cinc-zero/internal/api"
+	"github.com/tas50/cinc-zero/internal/auth"
+	"github.com/tas50/cinc-zero/internal/store"
+)
+
+// Options configures a Server. The zero value is usable: it creates a single
+// organization named "acme", an admin user named "pivotal", and enforces real
+// Mixlib authentication with a 15-minute clock-skew window.
+type Options struct {
+	// Addr is the listen address. Defaults to "127.0.0.1:0" (random port).
+	Addr string
+	// Orgs are the organizations to create at startup. Defaults to ["acme"].
+	Orgs []string
+	// AdminName is the bootstrap admin user. Defaults to "pivotal".
+	AdminName string
+	// DisableAuth skips signature verification entirely (useful for tests that
+	// do not want to sign requests).
+	DisableAuth bool
+	// SkewSeconds is the allowed clock skew for request timestamps. Defaults to
+	// 900 (15 minutes).
+	SkewSeconds int
+	// Now is the clock used for skew checks. Defaults to time.Now.
+	Now func() time.Time
+}
+
+func (o *Options) withDefaults() {
+	if o.Addr == "" {
+		o.Addr = "127.0.0.1:0"
+	}
+	if len(o.Orgs) == 0 {
+		o.Orgs = []string{"acme"}
+	}
+	if o.AdminName == "" {
+		o.AdminName = "pivotal"
+	}
+	if o.SkewSeconds == 0 {
+		o.SkewSeconds = 900
+	}
+	if o.Now == nil {
+		o.Now = time.Now
+	}
+}
+
+// Server is a running (or ready-to-run) cinc-zero instance.
+type Server struct {
+	opts     Options
+	store    *store.Store
+	handler  http.Handler
+	httpSrv  *http.Server
+	listener net.Listener
+	adminKey []byte // PEM-encoded admin private key
+	url      string
+}
+
+// New builds a Server: it creates the store, bootstraps the admin user and the
+// configured organizations, and wires the API behind the auth layer. It does
+// not begin listening; call Start for that.
+func New(opts Options) (*Server, error) {
+	opts.withDefaults()
+	st := store.New()
+
+	// Bootstrap the admin user with a fresh key pair.
+	key, err := auth.GenerateKey()
+	if err != nil {
+		return nil, fmt.Errorf("generate admin key: %w", err)
+	}
+	pubPEM, err := auth.EncodePublicKeyPEM(&key.PublicKey)
+	if err != nil {
+		return nil, err
+	}
+	adminDoc := fmt.Sprintf(`{"username":%q,"admin":true,"public_key":%q}`, opts.AdminName, string(pubPEM))
+	st.Global().Put("users", opts.AdminName, []byte(adminDoc))
+
+	for _, name := range opts.Orgs {
+		org, err := st.CreateOrg(name)
+		if err != nil {
+			return nil, fmt.Errorf("create org %q: %w", name, err)
+		}
+		api.SeedOrg(org)
+	}
+
+	s := &Server{
+		opts:     opts,
+		store:    st,
+		adminKey: auth.EncodePrivateKeyPEM(key),
+	}
+	handler := api.New(st).Handler()
+	if !opts.DisableAuth {
+		handler = s.authMiddleware(handler)
+	}
+	s.handler = handler
+	return s, nil
+}
+
+// Start binds the listener and serves in a background goroutine.
+func (s *Server) Start() error {
+	ln, err := net.Listen("tcp", s.opts.Addr)
+	if err != nil {
+		return err
+	}
+	s.listener = ln
+	s.url = "http://" + ln.Addr().String()
+	s.httpSrv = &http.Server{Handler: s.handler}
+	go func() {
+		if err := s.httpSrv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			// Serve errors after Close are expected; nothing to do here.
+			_ = err
+		}
+	}()
+	return nil
+}
+
+// Stop gracefully shuts the server down.
+func (s *Server) Stop(ctx context.Context) error {
+	if s.httpSrv == nil {
+		return nil
+	}
+	return s.httpSrv.Shutdown(ctx)
+}
+
+// URL is the base URL the server is listening on (valid after Start).
+func (s *Server) URL() string { return s.url }
+
+// AdminKey returns the PEM-encoded private key for the admin user. Sign
+// requests with this key (and AdminName) to act as the administrator.
+func (s *Server) AdminKey() []byte { return s.adminKey }
+
+// AdminName returns the bootstrap admin user name.
+func (s *Server) AdminName() string { return s.opts.AdminName }
+
+// Store exposes the underlying store for programmatic seeding and inspection.
+func (s *Server) Store() *store.Store { return s.store }
+
+// publicKeyFor resolves an actor's RSA public key, checking org clients (when
+// the request targets an org) and then global users.
+func (s *Server) publicKeyFor(path, actor string) (*rsa.PublicKey, bool) {
+	if org := orgFromPath(path); org != "" {
+		if o, ok := s.store.Org(org); ok {
+			if pub, ok := actorKey(o, "clients", actor); ok {
+				return pub, true
+			}
+		}
+	}
+	if pub, ok := actorKey(s.store.Global(), "users", actor); ok {
+		return pub, true
+	}
+	return nil, false
+}

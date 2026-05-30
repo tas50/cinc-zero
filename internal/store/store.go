@@ -17,15 +17,26 @@ var (
 	ErrNotFound = errors.New("store: not found")
 )
 
-// Store holds every organization's data.
+// Store holds every organization's data plus a global space for server-level
+// objects (users and organization metadata) that live outside any org.
 type Store struct {
-	mu   sync.RWMutex
-	orgs map[string]*Org
+	mu     sync.RWMutex
+	orgs   map[string]*Org
+	global *Org
 }
 
 // New returns an empty Store.
 func New() *Store {
-	return &Store{orgs: make(map[string]*Org)}
+	return &Store{
+		orgs:   make(map[string]*Org),
+		global: &Org{name: "", data: make(map[string]map[string][]byte)},
+	}
+}
+
+// Global returns the server-global object space, used for collections such as
+// "users" and "organizations" that are not scoped to an organization.
+func (s *Store) Global() *Org {
+	return s.global
 }
 
 // CreateOrg creates a new, empty organization. It returns ErrConflict if an
