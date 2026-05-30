@@ -32,6 +32,51 @@ func (a *API) registerCookbookRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+base+"/{name}/{version}", a.getCookbookVersion)
 	mux.HandleFunc("PUT "+base+"/{name}/{version}", a.putCookbookVersion)
 	mux.HandleFunc("DELETE "+base+"/{name}/{version}", a.deleteCookbookVersion)
+
+	mux.HandleFunc("GET /organizations/{org}/universe", a.universe)
+}
+
+// universe reports every cookbook version with its dependency constraints and
+// download location, as consumed by Policyfile/Berkshelf dependency solvers.
+func (a *API) universe(w http.ResponseWriter, r *http.Request) {
+	org := a.org(w, r)
+	if org == nil {
+		return
+	}
+	out := map[string]any{}
+	for name, vers := range cookbookVersions(org) {
+		versions := map[string]any{}
+		for _, v := range vers {
+			raw, ok := org.Get("cookbooks", cookbookKey(name, v))
+			if !ok {
+				continue
+			}
+			var m map[string]any
+			if json.Unmarshal(raw, &m) != nil {
+				continue
+			}
+			url := cookbookBaseURL(r, org.Name(), name) + "/" + v
+			versions[v] = map[string]any{
+				"location_type": "chef_server",
+				"location_path": url,
+				"download_url":  url,
+				"dependencies":  manifestDependencies(m),
+			}
+		}
+		out[name] = versions
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// manifestDependencies extracts metadata.dependencies, defaulting to an empty
+// object so the universe entry always carries a dependencies map.
+func manifestDependencies(m map[string]any) map[string]any {
+	if md, ok := m["metadata"].(map[string]any); ok {
+		if deps, ok := md["dependencies"].(map[string]any); ok {
+			return deps
+		}
+	}
+	return map[string]any{}
 }
 
 // --- file store -----------------------------------------------------------
@@ -176,8 +221,14 @@ func sandboxID(sortedSums []string) string {
 
 func cookbookKey(name, version string) string { return name + "/" + version }
 
+// collectionItemURL builds the URL for a versioned-collection item such as
+// /organizations/{org}/cookbooks/{name} (shared by cookbooks and artifacts).
+func collectionItemURL(r *http.Request, org, segment, name string) string {
+	return requestBaseURL(r) + "/organizations/" + org + "/" + segment + "/" + name
+}
+
 func cookbookBaseURL(r *http.Request, org, name string) string {
-	return requestBaseURL(r) + "/organizations/" + org + "/cookbooks/" + name
+	return collectionItemURL(r, org, "cookbooks", name)
 }
 
 // cookbookVersions returns name -> versions (each list sorted newest first).
@@ -201,7 +252,7 @@ func (a *API) listCookbooks(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	writeJSON(w, http.StatusOK, cookbookListBody(r, org, cookbookVersions(org)))
+	writeJSON(w, http.StatusOK, collectionListBody(r, org, "cookbooks", "version", cookbookVersions(org)))
 }
 
 func (a *API) getCookbook(w http.ResponseWriter, r *http.Request) {
@@ -216,12 +267,14 @@ func (a *API) getCookbook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Cannot find a cookbook named "+name)
 		return
 	}
-	writeJSON(w, http.StatusOK, cookbookListBody(r, org, map[string][]string{name: vers}))
+	writeJSON(w, http.StatusOK, collectionListBody(r, org, "cookbooks", "version", map[string][]string{name: vers}))
 }
 
-// cookbookListBody builds the Chef "name -> {url, versions:[...]}" structure,
-// honoring the num_versions query parameter ("all" or an integer).
-func cookbookListBody(r *http.Request, org *store.Org, versions map[string][]string) map[string]any {
+// collectionListBody builds the Chef "name -> {url, versions:[...]}" structure
+// shared by cookbooks and cookbook_artifacts. label is the per-entry key that
+// names the item ("version" for cookbooks, "identifier" for artifacts). The
+// num_versions query parameter ("all" or an integer) caps each list.
+func collectionListBody(r *http.Request, org *store.Org, segment, label string, items map[string][]string) map[string]any {
 	limit := -1
 	if nv := r.URL.Query().Get("num_versions"); nv != "" && nv != "all" {
 		if n, err := strconv.Atoi(nv); err == nil {
@@ -229,19 +282,19 @@ func cookbookListBody(r *http.Request, org *store.Org, versions map[string][]str
 		}
 	}
 	out := map[string]any{}
-	for name, vers := range versions {
-		if limit >= 0 && len(vers) > limit {
-			vers = vers[:limit]
+	for name, vals := range items {
+		if limit >= 0 && len(vals) > limit {
+			vals = vals[:limit]
 		}
-		entries := make([]map[string]string, 0, len(vers))
-		for _, v := range vers {
+		entries := make([]map[string]string, 0, len(vals))
+		for _, v := range vals {
 			entries = append(entries, map[string]string{
-				"url":     cookbookBaseURL(r, org.Name(), name) + "/" + v,
-				"version": v,
+				"url": collectionItemURL(r, org.Name(), segment, name) + "/" + v,
+				label: v,
 			})
 		}
 		out[name] = map[string]any{
-			"url":      cookbookBaseURL(r, org.Name(), name),
+			"url":      collectionItemURL(r, org.Name(), segment, name),
 			"versions": entries,
 		}
 	}
