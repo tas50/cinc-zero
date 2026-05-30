@@ -31,7 +31,7 @@ Compared to [chef-zero](https://github.com/chef/chef-zero), cinc-zero treats
 | `authenticate_user`, user↔org association + invite flow (`association_requests`) | ✅ |
 | Environment/role sub-endpoints (cookbook filtering, depsolve, recipes, nodes, run lists) | ✅ |
 | Server endpoints (`_stats`, `required_recipe`, `principals`, API-version negotiation) | ✅ |
-| chef-repo loader (JSON objects + data bags; cookbook dirs planned) | ✅ |
+| chef-repo loader (JSON objects, data bags, cookbook dirs) | ✅ |
 
 See [`docs/superpowers/specs`](docs/superpowers/specs) for the full design.
 
@@ -60,8 +60,10 @@ go build -o cinc-zero ./cmd/cinc-zero
 ```
 
 Pass `--repo ./chef-repo` to preload an on-disk chef-repo (its `nodes/`,
-`roles/`, `environments/`, `clients/`, `policies/`, `policy_groups/`, and
-`data_bags/` JSON) into the first org at startup, mirroring `knife upload`.
+`roles/`, `environments/`, `clients/`, `policies/`, `policy_groups/`,
+`data_bags/`, and `cookbooks/`) into the first org at startup, mirroring
+`knife upload`. Cookbook directories are checksummed into the blob store and
+served with a synthesized manifest.
 
 ## Docker
 
