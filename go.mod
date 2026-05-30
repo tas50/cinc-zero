@@ -1,3 +1,3 @@
-module github.com/mondoo/cinc-zero
+module github.com/tas50/cinc-zero
 
 go 1.26.3
