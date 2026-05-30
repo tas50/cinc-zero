@@ -85,9 +85,10 @@ func (s *Store) ListOrgs() []string {
 
 // Org is a single organization's collection of objects.
 type Org struct {
-	mu   sync.RWMutex
-	name string
-	data map[string]map[string][]byte // collection -> key -> raw JSON
+	mu    sync.RWMutex
+	name  string
+	data  map[string]map[string][]byte // collection -> key -> raw JSON
+	blobs map[string][]byte            // checksum -> raw file content
 }
 
 // Name returns the organization name.
@@ -156,6 +157,41 @@ func (o *Org) Keys(coll string) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// PutBlob stores raw file content keyed by its checksum (hex MD5). The Chef
+// cookbook upload flow uploads file bodies here before a cookbook manifest
+// referencing those checksums is created.
+func (o *Org) PutBlob(checksum string, data []byte) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.blobs == nil {
+		o.blobs = make(map[string][]byte)
+	}
+	cp := make([]byte, len(data))
+	copy(cp, data)
+	o.blobs[checksum] = cp
+}
+
+// Blob returns a copy of the blob stored under checksum and whether it exists.
+func (o *Org) Blob(checksum string) ([]byte, bool) {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	val, ok := o.blobs[checksum]
+	if !ok {
+		return nil, false
+	}
+	cp := make([]byte, len(val))
+	copy(cp, val)
+	return cp, true
+}
+
+// HasBlob reports whether a blob with the given checksum has been uploaded.
+func (o *Org) HasBlob(checksum string) bool {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	_, ok := o.blobs[checksum]
+	return ok
 }
 
 // Collections returns the sorted collection names that contain at least one key.
