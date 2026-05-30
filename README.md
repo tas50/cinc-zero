@@ -82,6 +82,19 @@ Authentication golden vectors under `internal/auth/testdata` are generated from
 the real `mixlib-authentication` gem via `ruby gen_vectors.rb`, guaranteeing
 byte-for-byte compatibility with Chef clients.
 
+### Conformance
+
+A build-tagged suite drives a **real Cinc client** (`knife`) against an
+in-process cinc-zero server, exercising signed reads/writes, search, and the
+cookbook sandbox/upload flow:
+
+```sh
+make conformance        # needs cinc-workstation: https://omnitruck.cinc.sh/install.sh
+```
+
+It skips automatically when no runnable `knife` is present, and runs in CI
+(`.github/workflows/conformance.yml`) after installing Cinc via omnitruck.
+
 ## License
 
 cinc-zero is licensed under the [Business Source License 1.1](LICENSE).

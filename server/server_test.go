@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"io"
 	"net/http"
 	"os"
@@ -190,5 +192,48 @@ func TestServerLoadsCookbookRepo(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "recipes/default.rb") || !strings.Contains(string(body), "/file_store/") {
 		t.Fatalf("cookbook manifest missing file or url: %s", body)
+	}
+}
+
+func TestFileStorePathSkipsAuth(t *testing.T) {
+	// Auth is enabled, but the cookbook file store must accept unsigned
+	// uploads/downloads (real Chef hands out pre-signed bookshelf URLs).
+	srv := startServer(t, Options{Orgs: []string{"acme"}})
+
+	content := "package 'nginx'\n"
+	sum := md5.Sum([]byte(content))
+	checksum := hex.EncodeToString(sum[:])
+	url := srv.URL() + "/organizations/acme/file_store/" + checksum
+
+	// Unsigned PUT is accepted.
+	req, _ := http.NewRequest("PUT", url, strings.NewReader(content))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("unsigned file_store PUT = %d, want 200", resp.StatusCode)
+	}
+
+	// Unsigned GET serves it back.
+	resp, err = http.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 || string(body) != content {
+		t.Fatalf("unsigned file_store GET = %d %q", resp.StatusCode, body)
+	}
+
+	// A non-file_store path still requires auth.
+	resp, err = http.Get(srv.URL() + "/organizations/acme/nodes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 401 {
+		t.Fatalf("unsigned nodes GET = %d, want 401", resp.StatusCode)
 	}
 }

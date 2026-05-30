@@ -15,7 +15,7 @@ LDFLAGS := -X $(LDFLAGS_PKG).version=$(VERSION) \
            -X $(LDFLAGS_PKG).commit=$(COMMIT) \
            -X $(LDFLAGS_PKG).buildDate=$(BUILD_DATE)
 
-.PHONY: all build dist install test vet fmt tidy clean run help
+.PHONY: all build dist install test conformance vet fmt tidy clean run help
 
 all: build
 
@@ -45,6 +45,11 @@ install:
 ## test: run the test suite
 test:
 	go test ./... -race -cover
+
+## conformance: drive a real Cinc client (knife) against cinc-zero; needs
+## cinc-workstation installed (see https://omnitruck.cinc.sh/install.sh)
+conformance:
+	go test -tags conformance ./conformance/ -v
 
 ## vet: run go vet across all packages
 vet:
