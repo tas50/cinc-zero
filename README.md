@@ -28,7 +28,7 @@ Compared to [chef-zero](https://github.com/chef/chef-zero), cinc-zero treats
 | Authz groups / containers (structural) | ✅ |
 | ACL endpoints (`_acl`, permissive/structural) | ✅ |
 | Key management API (client/user named keys, v1) | ✅ |
-| `authenticate_user`, user↔org association | ⏳ planned |
+| `authenticate_user`, user↔org association | ✅ |
 | chef-repo loader | ⏳ planned |
 
 See [`docs/superpowers/specs`](docs/superpowers/specs) for the full design.

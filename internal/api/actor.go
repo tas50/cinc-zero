@@ -68,8 +68,10 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 			resp["private_key"] = string(auth.EncodePrivateKeyPEM(key))
 			resp["public_key"] = string(pubPEM)
 		}
-		// The private key is never persisted.
+		// The private key is never persisted; a password is stored out-of-band
+		// (for authenticate_user) and stripped from the object.
 		delete(obj, "private_key")
+		stashPassword(org, name, obj)
 
 		raw := mustEncode(obj)
 		if err := org.Create(segment, name, raw); errors.Is(err, store.ErrConflict) {
@@ -127,6 +129,7 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 			return
 		}
 		delete(obj, "private_key")
+		stashPassword(org, name, obj)
 		raw := mustEncode(obj)
 		org.Put(segment, name, raw)
 		writeRaw(w, http.StatusOK, raw)
