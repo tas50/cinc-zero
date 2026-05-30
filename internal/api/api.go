@@ -42,6 +42,7 @@ func (a *API) Handler() http.Handler {
 	a.registerACLRoutes(mux)
 	a.registerAuthenticateRoutes(mux)
 	a.registerAssociationRoutes(mux)
+	a.registerAssociationRequestRoutes(mux)
 	a.registerPolicyRoutes(mux)
 	a.registerOrganizationRoutes(mux)
 	a.registerAuthzRoutes(mux)
