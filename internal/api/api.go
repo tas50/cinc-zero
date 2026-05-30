@@ -27,6 +27,7 @@ func (a *API) Handler() http.Handler {
 	a.registerObjectRoutes(mux, "nodes")
 	a.registerObjectRoutes(mux, "roles")
 	a.registerEnvironmentRoutes(mux)
+	a.registerEnvironmentSubRoutes(mux)
 
 	orgScope := func(w http.ResponseWriter, r *http.Request) *store.Org { return a.org(w, r) }
 	globalScope := func(http.ResponseWriter, *http.Request) *store.Org { return a.store.Global() }
