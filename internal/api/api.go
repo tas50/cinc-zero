@@ -32,6 +32,8 @@ func (a *API) Handler() http.Handler {
 	globalScope := func(http.ResponseWriter, *http.Request) *store.Org { return a.store.Global() }
 	a.registerActorRoutes(mux, "/organizations/{org}/", "clients", orgScope)
 	a.registerActorRoutes(mux, "/", "users", globalScope)
+	a.registerKeyRoutes(mux, "/organizations/{org}/", "clients", orgScope)
+	a.registerKeyRoutes(mux, "/", "users", globalScope)
 	a.registerDataBagRoutes(mux)
 	a.registerCookbookRoutes(mux)
 	a.registerCookbookArtifactRoutes(mux)
