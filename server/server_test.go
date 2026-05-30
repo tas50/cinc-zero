@@ -161,3 +161,34 @@ func TestServerLoadsRepo(t *testing.T) {
 		t.Fatalf("loaded node body = %s", body)
 	}
 }
+
+func TestServerLoadsCookbookRepo(t *testing.T) {
+	dir := t.TempDir()
+	cb := filepath.Join(dir, "cookbooks", "apache2", "recipes")
+	if err := os.MkdirAll(cb, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cookbooks", "apache2", "metadata.rb"),
+		[]byte("name 'apache2'\nversion '1.0.0'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cb, "default.rb"), []byte("package 'apache2'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := startServer(t, Options{Orgs: []string{"acme"}, DisableAuth: true, Repo: dir})
+
+	// The loaded cookbook is served with a download URL injected per file.
+	resp, err := http.Get(srv.URL() + "/organizations/acme/cookbooks/apache2/1.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("loaded cookbook GET = %d, want 200", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "recipes/default.rb") || !strings.Contains(string(body), "/file_store/") {
+		t.Fatalf("cookbook manifest missing file or url: %s", body)
+	}
+}

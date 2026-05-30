@@ -66,6 +66,14 @@ func Load(org *store.Org, root string) (*Summary, error) {
 		sum.Counts["data_bags"] = bags
 		sum.Counts["data_bag_items"] = items
 	}
+
+	cookbooks, err := loadCookbooks(org, filepath.Join(root, "cookbooks"))
+	if err != nil {
+		return nil, err
+	}
+	if cookbooks > 0 {
+		sum.Counts["cookbooks"] = cookbooks
+	}
 	return sum, nil
 }
 
