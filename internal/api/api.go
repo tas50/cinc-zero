@@ -33,6 +33,7 @@ func (a *API) Handler() http.Handler {
 	a.registerActorRoutes(mux, "/organizations/{org}/", "clients", orgScope)
 	a.registerActorRoutes(mux, "/", "users", globalScope)
 	a.registerDataBagRoutes(mux)
+	a.registerCookbookRoutes(mux)
 	a.registerPolicyRoutes(mux)
 	a.registerOrganizationRoutes(mux)
 	a.registerAuthzRoutes(mux)
