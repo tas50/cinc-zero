@@ -19,6 +19,7 @@ import (
 
 	"github.com/tas50/cinc-zero/internal/api"
 	"github.com/tas50/cinc-zero/internal/auth"
+	"github.com/tas50/cinc-zero/internal/repo"
 	"github.com/tas50/cinc-zero/internal/store"
 )
 
@@ -40,6 +41,10 @@ type Options struct {
 	SkewSeconds int
 	// Now is the clock used for skew checks. Defaults to time.Now.
 	Now func() time.Time
+	// Repo is an optional path to a chef-repo whose objects (nodes, roles,
+	// environments, clients, policies, policy_groups, data bags) are loaded
+	// into the first organization at startup, mirroring `knife upload`.
+	Repo string
 }
 
 func (o *Options) withDefaults() {
@@ -98,6 +103,17 @@ func New(opts Options) (*Server, error) {
 			return nil, fmt.Errorf("create org %q: %w", name, err)
 		}
 		validatorKeys[name] = validator
+	}
+
+	// Load a chef-repo into the first organization, if configured.
+	if opts.Repo != "" {
+		org, ok := st.Org(opts.Orgs[0])
+		if !ok {
+			return nil, fmt.Errorf("repo target org %q not found", opts.Orgs[0])
+		}
+		if _, err := repo.Load(org, opts.Repo); err != nil {
+			return nil, fmt.Errorf("load repo %q: %w", opts.Repo, err)
+		}
 	}
 
 	s := &Server{

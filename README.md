@@ -31,7 +31,7 @@ Compared to [chef-zero](https://github.com/chef/chef-zero), cinc-zero treats
 | `authenticate_user`, user↔org association + invite flow (`association_requests`) | ✅ |
 | Environment/role sub-endpoints (cookbook filtering, depsolve, recipes, nodes, run lists) | ✅ |
 | Server endpoints (`_stats`, `required_recipe`, `principals`, API-version negotiation) | ✅ |
-| chef-repo loader | ⏳ planned |
+| chef-repo loader (JSON objects + data bags; cookbook dirs planned) | ✅ |
 
 See [`docs/superpowers/specs`](docs/superpowers/specs) for the full design.
 
@@ -58,6 +58,10 @@ For tests that don't want to sign requests, set `Options{DisableAuth: true}`.
 go build -o cinc-zero ./cmd/cinc-zero
 ./cinc-zero --addr 127.0.0.1:8889 --orgs test --key-out admin.pem
 ```
+
+Pass `--repo ./chef-repo` to preload an on-disk chef-repo (its `nodes/`,
+`roles/`, `environments/`, `clients/`, `policies/`, `policy_groups/`, and
+`data_bags/` JSON) into the first org at startup, mirroring `knife upload`.
 
 ## Docker
 
