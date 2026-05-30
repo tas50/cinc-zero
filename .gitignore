@@ -1,4 +1,7 @@
 bin/
-cinc-zero
+# Anchor to the repo root so the built binary is ignored but the
+# cmd/cinc-zero/ source directory is not.
+/cinc-zero
+dist/
 *.pem
 .DS_Store
