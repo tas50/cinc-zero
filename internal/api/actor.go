@@ -52,8 +52,18 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 			"uri": objectURL(r, orgSegment(r), segment, name),
 		}
 
-		// Generate a key pair unless the caller supplied a public key.
-		if _, hasPub := obj["public_key"].(string); !hasPub {
+		// A caller-supplied public key may arrive at the top level or nested
+		// under "chef_key" (the key-management shape knife/cinc send). Accept
+		// either; only generate a pair when no public key is provided.
+		pub, _ := obj["public_key"].(string)
+		if pub == "" {
+			if ck, ok := obj["chef_key"].(map[string]any); ok {
+				pub, _ = ck["public_key"].(string)
+			}
+		}
+		if pub != "" {
+			obj["public_key"] = pub
+		} else {
 			key, err := auth.GenerateKey()
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "key generation failed")
@@ -65,11 +75,19 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 				return
 			}
 			obj["public_key"] = string(pubPEM)
-			resp["private_key"] = string(auth.EncodePrivateKeyPEM(key))
-			resp["public_key"] = string(pubPEM)
+			// Modern Chef returns the generated key nested under "chef_key"
+			// (the key-management shape), which is what knife and cinc read.
+			resp["chef_key"] = map[string]any{
+				"name":            "default",
+				"public_key":      string(pubPEM),
+				"expiration_date": "infinity",
+				"private_key":     string(auth.EncodePrivateKeyPEM(key)),
+			}
 		}
-		// The private key is never persisted; a password is stored out-of-band
-		// (for authenticate_user) and stripped from the object.
+		// The private key is never persisted; the public key lives top-level on
+		// the stored actor, and a password is stashed out-of-band (for
+		// authenticate_user). Strip the transient/nested fields.
+		delete(obj, "chef_key")
 		delete(obj, "private_key")
 		stashPassword(org, name, obj)
 
