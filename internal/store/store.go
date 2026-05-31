@@ -194,6 +194,15 @@ func (o *Org) HasBlob(checksum string) bool {
 	return ok
 }
 
+// DeleteBlob removes the blob stored under checksum, if any. It is used to
+// garbage-collect file-store content no longer referenced by any cookbook or
+// cookbook_artifact manifest.
+func (o *Org) DeleteBlob(checksum string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	delete(o.blobs, checksum)
+}
+
 // Collections returns the sorted collection names that contain at least one key.
 func (o *Org) Collections() []string {
 	o.mu.RLock()
