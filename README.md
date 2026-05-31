@@ -4,34 +4,35 @@ A fully in-memory [Chef Infra Server](https://docs.chef.io/server/) implemented
 in Go, for use in test pipelines. It speaks the real Chef Infra Server API and
 authenticates real `chef-client` / `knife` / `cinc` clients using genuine
 [Mixlib::Authentication](https://github.com/chef/mixlib-authentication) signed
-requests — but keeps everything in memory, so it starts instantly and leaves
+requests, but keeps everything in memory, so it starts instantly and leaves
 nothing behind.
 
-Compared to [chef-zero](https://github.com/chef/chef-zero), cinc-zero treats
-**Policyfiles and policy groups** as first-class.
+## Why cinc-zero
 
-## Status
+**Complete Chef Infra Server API, including Policyfiles.** cinc-zero implements
+the full surface a real client touches: nodes, roles, environments, clients,
+users, data bags, cookbooks (sandboxes, file store, artifacts, `/universe`),
+search, authz groups/containers, ACLs, key management, user↔org association and
+invites, and multi-org management. Mixlib authentication (v1.0 / 1.1 / 1.3) is
+verified byte-for-byte against the real gem, so unmodified `chef-client`,
+`knife`, and `cinc` clients just work. Crucially, **Policyfiles and policy
+groups are first-class**, with deploy and pull flows that chef-zero leaves on
+the table.
 
-| Area | State |
-|------|-------|
-| In-memory store (org-scoped + global) | ✅ |
-| Mixlib auth v1.0 / 1.1 / 1.3 (verified against the real gem) | ✅ |
-| Nodes, roles, environments | ✅ |
-| Clients, users (with key generation) | ✅ |
-| Data bags + items | ✅ |
-| Policyfiles, policy revisions, policy groups (deploy/pull) | ✅ |
-| Multi-org + organization management API | ✅ |
-| Embeddable library, standalone binary, Docker image | ✅ |
-| Cookbooks + sandboxes + file store (upload/download, `_latest`, `_recipes`) | ✅ |
-| Cookbook artifacts + `/universe` | ✅ |
-| Search (in-process Solr query engine + Chef document expander) | ✅ |
-| Authz groups / containers (structural) | ✅ |
-| ACL endpoints (`_acl`, permissive/structural) | ✅ |
-| Key management API (client/user named keys, v1) | ✅ |
-| `authenticate_user`, user↔org association + invite flow (`association_requests`) | ✅ |
-| Environment/role sub-endpoints (cookbook filtering, depsolve, recipes, nodes, run lists) | ✅ |
-| Server endpoints (`_stats`, `license`, `required_recipe`, `principals`, API-version negotiation) | ✅ |
-| chef-repo loader (JSON objects, data bags, cookbook dirs) | ✅ |
+**Performance.** Built in Go, cinc-zero handles requests concurrently across all
+available cores. Its goroutine-per-request model scales naturally under the
+parallel load that real test fleets generate, with none of the global-lock
+contention that single-threaded Ruby servers hit. State lives entirely in
+memory, so there's no database or disk round-trip in the request path. On top of
+that, the hot code paths have been deliberately optimized (cached flattened
+search documents and parsed actor keys, batched and scoped scans, and copy-free
+reads) to keep search, auth, and object access fast even with large numbers of
+nodes and concurrent clients.
+
+**Easy installation: a single binary, no Ruby.** cinc-zero ships as one static
+Go binary (or a Docker image) with zero Ruby or gem dependencies. Drop it in,
+run it, and point your clients at it; embed it directly in Go tests as a
+library. No bundler, no rbenv, no native extensions.
 
 See [`docs/superpowers/specs`](docs/superpowers/specs) for the full design.
 
@@ -52,7 +53,7 @@ adminID  := srv.AdminName()           // "pivotal"
 
 For tests that don't want to sign requests, set `Options{DisableAuth: true}`.
 
-ACLs and group membership are stored but not enforced by default — every
+ACLs and group membership are stored but not enforced by default; every
 authenticated actor is permitted, which keeps test pipelines friction-free. To
 exercise authorization-dependent behavior (requests a real server answers with
 `403 Forbidden`), set `Options{EnforceACL: true}`. Enforcement honors the
@@ -76,7 +77,7 @@ go build -o cinc-zero ./cmd/cinc-zero
 
 Pass `--enforce-acls` to turn on ACL enforcement (off by default; see the
 `EnforceACL` option above). Pass `--no-auth` to disable signature verification
-(the two are mutually exclusive — enforcement needs an authenticated actor).
+(the two are mutually exclusive; enforcement needs an authenticated actor).
 
 Pass `--repo ./chef-repo` to preload an on-disk chef-repo (its `nodes/`,
 `roles/`, `environments/`, `clients/`, `policies/`, `policy_groups/`,
