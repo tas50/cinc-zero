@@ -64,7 +64,7 @@ func (a *API) Handler() http.Handler {
 	a.registerAuthzRoutes(mux)
 	a.registerServerEndpoints(mux)
 
-	var h http.Handler = mux
+	var h http.Handler = withJSONErrors(mux)
 	if a.enforceACL {
 		h = a.authzMiddleware(h)
 	}
