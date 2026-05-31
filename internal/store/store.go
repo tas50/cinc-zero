@@ -135,6 +135,20 @@ func (o *Org) Get(coll, key string) ([]byte, bool) {
 	return cp, true
 }
 
+// View returns the stored value at coll/key without copying it. Stored values
+// are never mutated in place (set always writes a fresh slice), so the returned
+// slice is safe to read concurrently — but callers MUST treat it as read-only
+// and never mutate or retain it past the point another goroutine could replace
+// it. Use this on hot read paths (search scans, list endpoints, signature key
+// lookups, file-store reads) that only unmarshal, hash, or write the bytes; use
+// Get when the caller needs an owned copy.
+func (o *Org) View(coll, key string) ([]byte, bool) {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	val, ok := o.data[coll][key]
+	return val, ok
+}
+
 // Delete removes coll/key, returning the removed value and whether it existed.
 func (o *Org) Delete(coll, key string) ([]byte, bool) {
 	o.mu.Lock()
@@ -184,6 +198,19 @@ func (o *Org) Blob(checksum string) ([]byte, bool) {
 	cp := make([]byte, len(val))
 	copy(cp, val)
 	return cp, true
+}
+
+// BlobView returns the stored blob without copying it, for read-only callers
+// such as the cookbook file-store download path that only write the bytes to a
+// response. Like View, the returned slice MUST be treated as read-only. Blobs
+// are never mutated in place (PutBlob always stores a fresh copy), so the slice
+// is safe to read after the lock is released. Use Blob when an owned copy is
+// needed.
+func (o *Org) BlobView(checksum string) ([]byte, bool) {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	val, ok := o.blobs[checksum]
+	return val, ok
 }
 
 // HasBlob reports whether a blob with the given checksum has been uploaded.

@@ -49,3 +49,28 @@ func TestBlobStore(t *testing.T) {
 		t.Fatal("blobs leaked across orgs")
 	}
 }
+
+func TestBlobViewReturnsReferenceNotCopy(t *testing.T) {
+	st := New()
+	org, _ := st.CreateOrg("acme")
+	org.PutBlob("abc123", []byte("file content\n"))
+
+	got, ok := org.BlobView("abc123")
+	if !ok || string(got) != "file content\n" {
+		t.Fatalf("BlobView = %q, %v", got, ok)
+	}
+	if _, ok := org.BlobView("missing"); ok {
+		t.Fatal("BlobView of missing checksum should report false")
+	}
+
+	// BlobView returns the backing slice directly; Blob copies.
+	a, _ := org.BlobView("abc123")
+	b, _ := org.BlobView("abc123")
+	if &a[0] != &b[0] {
+		t.Fatal("BlobView should return the backing slice without copying")
+	}
+	c, _ := org.Blob("abc123")
+	if &a[0] == &c[0] {
+		t.Fatal("Blob should return a defensive copy distinct from BlobView")
+	}
+}

@@ -61,7 +61,7 @@ func (a *API) resolveIndex(r *http.Request, org *store.Org, name string) (search
 			urlFor:     func(r *http.Request, org, id string) string { return objectURL(r, org, coll, id) },
 		}, true
 	default:
-		if _, ok := org.Get(dataBagsColl, name); !ok {
+		if _, ok := org.View(dataBagsColl, name); !ok {
 			return searchIndex{}, false
 		}
 		return searchIndex{
@@ -110,7 +110,7 @@ func (a *API) runSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	var matches []match
 	for _, id := range org.Keys(idx.collection) {
-		raw, ok := org.Get(idx.collection, id)
+		raw, ok := org.View(idx.collection, id)
 		if !ok {
 			continue
 		}

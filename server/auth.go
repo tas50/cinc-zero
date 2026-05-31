@@ -41,7 +41,9 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		pub, ok := s.publicKeyFor(r.URL.Path, parsed.UserID)
+		// One lookup resolves both the signing key and the actor identity from a
+		// single store read of the actor's record.
+		pub, actor, ok := s.resolveAuth(r.URL.Path, parsed.UserID)
 		if !ok {
 			unauthorized(w, "Failed to authenticate as '"+parsed.UserID+"'. Ensure that your node_name and client key are correct.")
 			return
@@ -59,32 +61,51 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 
 		// Carry the verified actor for the authorization layer (a no-op unless
 		// EnforceACL is set).
-		r = r.WithContext(api.WithActor(r.Context(), s.resolveActor(r.URL.Path, parsed.UserID)))
+		r = r.WithContext(api.WithActor(r.Context(), actor))
 		next.ServeHTTP(w, r)
 	})
 }
 
-// resolveActor builds the actor identity for authorization. It mirrors
-// publicKeyFor's resolution order — an org client first, then a global user —
-// and records whether a global user is an admin (Chef's pivotal superuser).
-func (s *Server) resolveActor(path, name string) api.Actor {
+// resolveAuth resolves an actor's signing key and identity in a single store
+// read of its record. It checks org clients first (when the request targets an
+// org), then global users, mirroring Chef's resolution order. The actor records
+// whether it is an org client (vs. a global user) and whether a global user is
+// an admin (Chef's pivotal superuser, which bypasses ACLs).
+func (s *Server) resolveAuth(path, name string) (*rsa.PublicKey, api.Actor, bool) {
 	if org := orgFromPath(path); org != "" {
 		if o, ok := s.store.Org(org); ok {
-			if _, ok := o.Get("clients", name); ok {
-				return api.Actor{Name: name, IsClient: true}
+			if pub, _, ok := s.parseActorRecord(o, "clients", name); ok {
+				return pub, api.Actor{Name: name, IsClient: true}, true
 			}
 		}
 	}
-	actor := api.Actor{Name: name}
-	if raw, ok := s.store.Global().Get("users", name); ok {
-		var u struct {
-			Admin bool `json:"admin"`
-		}
-		if json.Unmarshal(raw, &u) == nil {
-			actor.IsGlobalAdmin = u.Admin
-		}
+	if pub, admin, ok := s.parseActorRecord(s.store.Global(), "users", name); ok {
+		return pub, api.Actor{Name: name, IsGlobalAdmin: admin}, true
 	}
-	return actor
+	return nil, api.Actor{}, false
+}
+
+// parseActorRecord reads an actor record from a store collection and extracts
+// its RSA public key (parsed through the server's key cache to avoid re-parsing
+// PEM/x509 on every request) and its admin flag. The record is read copy-free
+// since it is only unmarshalled here.
+func (s *Server) parseActorRecord(org *store.Org, collection, name string) (pub *rsa.PublicKey, admin, ok bool) {
+	raw, found := org.View(collection, name)
+	if !found {
+		return nil, false, false
+	}
+	var rec struct {
+		PublicKey string `json:"public_key"`
+		Admin     bool   `json:"admin"`
+	}
+	if err := json.Unmarshal(raw, &rec); err != nil || rec.PublicKey == "" {
+		return nil, false, false
+	}
+	key, err := s.keyCache.Parse(rec.PublicKey)
+	if err != nil {
+		return nil, false, false
+	}
+	return key, rec.Admin, true
 }
 
 // checkSkew rejects timestamps outside the allowed clock-skew window.
@@ -127,24 +148,4 @@ func orgFromPath(path string) string {
 	rest := path[len(prefix):]
 	org, _, _ := strings.Cut(rest, "/")
 	return org
-}
-
-// actorKey reads an actor's public_key field from a store collection and parses
-// it into an RSA public key.
-func actorKey(org *store.Org, collection, name string) (*rsa.PublicKey, bool) {
-	raw, ok := org.Get(collection, name)
-	if !ok {
-		return nil, false
-	}
-	var obj struct {
-		PublicKey string `json:"public_key"`
-	}
-	if err := json.Unmarshal(raw, &obj); err != nil || obj.PublicKey == "" {
-		return nil, false
-	}
-	pub, err := auth.ParsePublicKey([]byte(obj.PublicKey))
-	if err != nil {
-		return nil, false
-	}
-	return pub, true
 }
