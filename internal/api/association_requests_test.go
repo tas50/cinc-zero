@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -115,5 +116,81 @@ func TestAssociationRequestRescind(t *testing.T) {
 	resp, _ = do(t, "DELETE", base+"/association_requests/"+id, "")
 	if resp.StatusCode != 404 {
 		t.Fatalf("rescind again = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestInviteInvalidResponse400(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	id := invite(t, srv.URL, "dave")
+	// A response that is neither accept nor reject is rejected, and the invite
+	// is left intact.
+	resp, body := do(t, "PUT", srv.URL+"/users/dave/association_requests/"+id, `{"response":"maybe"}`)
+	if resp.StatusCode != 400 {
+		t.Fatalf("invalid response = %d, want 400; body %s", resp.StatusCode, body)
+	}
+	_, body = do(t, "GET", srv.URL+"/users/dave/association_requests/count", "")
+	var count struct {
+		Value int `json:"value"`
+	}
+	json.Unmarshal([]byte(body), &count)
+	if count.Value != 1 {
+		t.Fatalf("invite should survive an invalid response, count = %s", body)
+	}
+}
+
+func TestAcceptAddsToUsersGroup(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	id := invite(t, srv.URL, "erin")
+
+	resp, body := do(t, "PUT", srv.URL+"/users/erin/association_requests/"+id, `{"response":"accept"}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("accept = %d: %s", resp.StatusCode, body)
+	}
+	// The new member appears in the org's built-in "users" group.
+	_, body = do(t, "GET", base+"/groups/users", "")
+	var g struct {
+		Users []string `json:"users"`
+	}
+	json.Unmarshal([]byte(body), &g)
+	found := false
+	for _, u := range g.Users {
+		if u == "erin" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("erin should be in the users group after accept: %s", body)
+	}
+}
+
+func TestInviteAlreadyMember409(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	id := invite(t, srv.URL, "frank")
+	if resp, _ := do(t, "PUT", srv.URL+"/users/frank/association_requests/"+id, `{"response":"accept"}`); resp.StatusCode != 200 {
+		t.Fatalf("accept failed")
+	}
+	// frank is now a member; inviting again conflicts.
+	resp, _ := do(t, "POST", base+"/association_requests", `{"user":"frank"}`)
+	if resp.StatusCode != 409 {
+		t.Fatalf("invite already-member = %d, want 409", resp.StatusCode)
+	}
+}
+
+func TestInviteNotFoundMessageHasColon(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	do(t, "POST", srv.URL+"/users", `{"name":"grace"}`)
+
+	// Rescinding a nonexistent invite: 404 with the standard colon body.
+	resp, body := do(t, "DELETE", base+"/association_requests/bogus-id", "")
+	if resp.StatusCode != 404 || !strings.Contains(body, "Cannot find association request: bogus-id") {
+		t.Fatalf("rescind nonexistent = %d %s, want 404 with colon message", resp.StatusCode, body)
+	}
+	// Responding to a nonexistent invite: same.
+	resp, body = do(t, "PUT", srv.URL+"/users/grace/association_requests/bogus-id", `{"response":"accept"}`)
+	if resp.StatusCode != 404 || !strings.Contains(body, "Cannot find association request: bogus-id") {
+		t.Fatalf("respond nonexistent = %d %s, want 404 with colon message", resp.StatusCode, body)
 	}
 }
