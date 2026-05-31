@@ -30,7 +30,19 @@ func (a *API) registerAuthenticateRoutes(mux *http.ServeMux) {
 }
 
 func (a *API) authenticateUser(w http.ResponseWriter, r *http.Request) {
+	// Only the superuser may verify another user's credentials. When the request
+	// carries an authenticated actor (the server layer always sets one; the ACL
+	// layer too), reject any non-admin caller. With no actor in context — auth
+	// disabled, or the API-layer tests — the endpoint stays open, matching the
+	// permissive default the rest of the package uses.
+	if actor, ok := actorFromContext(r.Context()); ok && !actor.IsGlobalAdmin {
+		writeError(w, http.StatusForbidden, "You are not allowed to take this action.")
+		return
+	}
+
+	// chef-client/knife send the identity as "username"; accept "name" too.
 	var body struct {
+		Username string `json:"username"`
 		Name     string `json:"name"`
 		Password string `json:"password"`
 	}
@@ -38,14 +50,18 @@ func (a *API) authenticateUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	name := body.Username
+	if name == "" {
+		name = body.Name
+	}
 
 	global := a.store.Global()
-	userRaw, ok := global.Get("users", body.Name)
+	userRaw, ok := global.Get("users", name)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "Failed to authenticate. Username and password incorrect.")
 		return
 	}
-	stored, ok := global.Get(passwordsColl, body.Name)
+	stored, ok := global.Get(passwordsColl, name)
 	if !ok || string(stored) != body.Password {
 		writeError(w, http.StatusUnauthorized, "Failed to authenticate. Username and password incorrect.")
 		return

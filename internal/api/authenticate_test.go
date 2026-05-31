@@ -38,3 +38,22 @@ func TestAuthenticateUser(t *testing.T) {
 		t.Fatalf("authenticate (unknown) = %d, want 401", resp.StatusCode)
 	}
 }
+
+// TestAuthenticateUserByUsername covers the real chef-client/knife request
+// shape, which sends the identity under "username" (not "name"). Valid
+// credentials must authenticate; a wrong password is still rejected.
+func TestAuthenticateUserByUsername(t *testing.T) {
+	srv, _ := newTestAPI(t)
+
+	do(t, "POST", srv.URL+"/users", `{"name":"carol","password":"p@ss"}`)
+
+	resp, body := do(t, "POST", srv.URL+"/authenticate_user", `{"username":"carol","password":"p@ss"}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("authenticate by username (correct) = %d: %s", resp.StatusCode, body)
+	}
+
+	resp, _ = do(t, "POST", srv.URL+"/authenticate_user", `{"username":"carol","password":"wrong"}`)
+	if resp.StatusCode != 401 {
+		t.Fatalf("authenticate by username (wrong) = %d, want 401", resp.StatusCode)
+	}
+}
