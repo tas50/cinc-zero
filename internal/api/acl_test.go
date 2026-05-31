@@ -104,3 +104,57 @@ func TestACLDataBagAndOrg(t *testing.T) {
 		t.Fatalf("org acl missing grant: %s", body)
 	}
 }
+
+func TestUserACLEndpoints(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL
+	do(t, "POST", base+"/users", `{"name":"alice"}`)
+
+	// Full user ACL: all five permissions, JSON.
+	resp, body := do(t, "GET", base+"/users/alice/_acl", "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("user acl = %d: %s", resp.StatusCode, body)
+	}
+	var acl map[string]aclPerm
+	if err := json.Unmarshal([]byte(body), &acl); err != nil {
+		t.Fatalf("decode user acl: %v (%s)", err, body)
+	}
+	for _, p := range []string{"create", "read", "update", "delete", "grant"} {
+		if _, ok := acl[p]; !ok {
+			t.Fatalf("user acl missing %q: %s", p, body)
+		}
+	}
+
+	// Single permission.
+	if resp, _ := do(t, "GET", base+"/users/alice/_acl/read", ""); resp.StatusCode != 200 {
+		t.Fatalf("user acl read = %d", resp.StatusCode)
+	}
+
+	// PUT updates and persists.
+	if resp, _ := do(t, "PUT", base+"/users/alice/_acl/grant", `{"grant":{"actors":["bob"],"groups":[]}}`); resp.StatusCode != 200 {
+		t.Fatalf("user acl put = %d", resp.StatusCode)
+	}
+	_, body = do(t, "GET", base+"/users/alice/_acl", "")
+	json.Unmarshal([]byte(body), &acl)
+	if len(acl["grant"].Actors) != 1 || acl["grant"].Actors[0] != "bob" {
+		t.Fatalf("user acl grant not persisted: %s", body)
+	}
+
+	// Invalid permission → 404.
+	if resp, _ := do(t, "GET", base+"/users/alice/_acl/bogus", ""); resp.StatusCode != 404 {
+		t.Fatalf("user acl bogus = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestPolicyGroupACLPutStatus201(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	// policy_group ACL PUT returns 201, matching Chef.
+	if resp, body := do(t, "PUT", base+"/policy_groups/prod/_acl/read", `{"read":{"actors":[],"groups":["admins"]}}`); resp.StatusCode != 201 {
+		t.Fatalf("policy_group acl put = %d, want 201; body %s", resp.StatusCode, body)
+	}
+	// Other object types stay 200.
+	if resp, _ := do(t, "PUT", base+"/nodes/web01/_acl/read", `{"read":{"actors":[],"groups":["admins"]}}`); resp.StatusCode != 200 {
+		t.Fatalf("node acl put = %d, want 200", resp.StatusCode)
+	}
+}
