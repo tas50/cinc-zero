@@ -95,6 +95,12 @@ docker build -t cinc-zero .
 docker run -p 8889:8889 cinc-zero
 ```
 
+Release images are published to GitHub Container Registry:
+
+```sh
+docker run -p 8889:8889 ghcr.io/tas50/cinc-zero:latest
+```
+
 ## Development
 
 ```sh
