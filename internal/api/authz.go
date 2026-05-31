@@ -9,10 +9,11 @@ import (
 	"github.com/tas50/cinc-zero/internal/store"
 )
 
-// Authorization in cinc-zero is structural, not enforced: groups and containers
-// are stored and returned faithfully (so tooling that reads or writes them
-// behaves), but every authenticated actor is treated as authorized. This
-// matches the design's permissive default for a test server.
+// Groups and containers are stored and returned faithfully (so tooling that
+// reads or writes them behaves). By default every authenticated actor is
+// treated as authorized — the permissive default for a test server — but when
+// ACL enforcement is enabled the membership recorded here actually gates
+// requests (see authz_enforce.go).
 
 var defaultGroups = []string{"admins", "billing-admins", "clients", "users"}
 

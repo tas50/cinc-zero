@@ -57,8 +57,34 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		// Carry the verified actor for the authorization layer (a no-op unless
+		// EnforceACL is set).
+		r = r.WithContext(api.WithActor(r.Context(), s.resolveActor(r.URL.Path, parsed.UserID)))
 		next.ServeHTTP(w, r)
 	})
+}
+
+// resolveActor builds the actor identity for authorization. It mirrors
+// publicKeyFor's resolution order — an org client first, then a global user —
+// and records whether a global user is an admin (Chef's pivotal superuser).
+func (s *Server) resolveActor(path, name string) api.Actor {
+	if org := orgFromPath(path); org != "" {
+		if o, ok := s.store.Org(org); ok {
+			if _, ok := o.Get("clients", name); ok {
+				return api.Actor{Name: name, IsClient: true}
+			}
+		}
+	}
+	actor := api.Actor{Name: name}
+	if raw, ok := s.store.Global().Get("users", name); ok {
+		var u struct {
+			Admin bool `json:"admin"`
+		}
+		if json.Unmarshal(raw, &u) == nil {
+			actor.IsGlobalAdmin = u.Admin
+		}
+	}
+	return actor
 }
 
 // checkSkew rejects timestamps outside the allowed clock-skew window.

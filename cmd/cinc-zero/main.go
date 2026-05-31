@@ -44,6 +44,7 @@ func run(args []string, out io.Writer) error {
 	admin := fs.String("admin", "pivotal", "bootstrap admin user name")
 	keyFile := fs.String("key-out", "", "write the admin private key to this file")
 	noAuth := fs.Bool("no-auth", false, "disable request signature verification")
+	enforceACLs := fs.Bool("enforce-acls", false, "enforce object ACLs and group membership (default: permissive)")
 	repoPath := fs.String("repo", "", "path to a chef-repo to load into the first org at startup")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -54,6 +55,7 @@ func run(args []string, out io.Writer) error {
 		Orgs:        splitCSV(*orgsCSV),
 		AdminName:   *admin,
 		DisableAuth: *noAuth,
+		EnforceACL:  *enforceACLs,
 		Repo:        *repoPath,
 	})
 	if err != nil {
@@ -70,8 +72,8 @@ func run(args []string, out io.Writer) error {
 		fmt.Fprintf(out, "Admin key for %q written to %s\n", srv.AdminName(), *keyFile)
 	}
 	fmt.Fprintf(out, "cinc-zero listening on %s\n", srv.URL())
-	fmt.Fprintf(out, "  orgs: %s\n  admin user: %s (auth %s)\n",
-		*orgsCSV, srv.AdminName(), authState(*noAuth))
+	fmt.Fprintf(out, "  orgs: %s\n  admin user: %s (auth %s, acl-enforcement %s)\n",
+		*orgsCSV, srv.AdminName(), authState(*noAuth), enforceState(*enforceACLs))
 	if *repoPath != "" {
 		fmt.Fprintf(out, "  loaded chef-repo from %s\n", *repoPath)
 	}
@@ -99,4 +101,11 @@ func authState(disabled bool) string {
 		return "disabled"
 	}
 	return "enabled"
+}
+
+func enforceState(enabled bool) string {
+	if enabled {
+		return "enabled"
+	}
+	return "permissive"
 }

@@ -13,11 +13,27 @@ import (
 // API holds the dependencies shared by all handlers.
 type API struct {
 	store *store.Store
+	// enforceACL turns on authorization enforcement: when set, requests are
+	// checked against object ACLs and group membership before reaching a
+	// handler. When clear (the default) every authenticated actor is permitted.
+	enforceACL bool
 }
 
-// New returns an API backed by st.
-func New(st *store.Store) *API {
-	return &API{store: st}
+// Option configures an API at construction time.
+type Option func(*API)
+
+// WithACLEnforcement enables (or disables) authorization enforcement.
+func WithACLEnforcement(enabled bool) Option {
+	return func(a *API) { a.enforceACL = enabled }
+}
+
+// New returns an API backed by st, applying any options.
+func New(st *store.Store, opts ...Option) *API {
+	a := &API{store: st}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
 }
 
 // Handler builds the HTTP handler exposing the full API surface.
@@ -47,7 +63,12 @@ func (a *API) Handler() http.Handler {
 	a.registerOrganizationRoutes(mux)
 	a.registerAuthzRoutes(mux)
 	a.registerServerEndpoints(mux)
-	return withAPIVersion(mux)
+
+	var h http.Handler = mux
+	if a.enforceACL {
+		h = a.authzMiddleware(h)
+	}
+	return withAPIVersion(h)
 }
 
 // org resolves the {org} path value to its store, writing a 404 and returning

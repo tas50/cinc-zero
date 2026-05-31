@@ -1,0 +1,361 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"slices"
+	"strings"
+
+	"github.com/tas50/cinc-zero/internal/store"
+)
+
+// ctxKey is the private type for context keys set by this package.
+type ctxKey int
+
+const actorContextKey ctxKey = iota
+
+// WithActor returns a copy of ctx carrying the authenticated actor, for the
+// authorization layer to read. The authentication middleware sets this once a
+// request's signature verifies.
+func WithActor(ctx context.Context, a Actor) context.Context {
+	return context.WithValue(ctx, actorContextKey, a)
+}
+
+// actorFromContext returns the actor stored in ctx, if any.
+func actorFromContext(ctx context.Context) (Actor, bool) {
+	a, ok := ctx.Value(actorContextKey).(Actor)
+	return a, ok
+}
+
+// authzMiddleware enforces object ACLs and group membership on each request. It
+// is only installed when enforcement is enabled.
+func (a *API) authzMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if a.authorize(w, r) {
+			next.ServeHTTP(w, r)
+		}
+	})
+}
+
+// authorize reports whether the request may proceed. When it denies the request
+// it writes the response (404 for a missing object, 403 for a permission
+// failure) and returns false. The ordering is authentication (already done) →
+// existence → authorization, so a missing object reports 404 rather than
+// leaking 403 to an actor that also lacks permission.
+func (a *API) authorize(w http.ResponseWriter, r *http.Request) bool {
+	actor, ok := actorFromContext(r.Context())
+	if !ok {
+		// No actor: an authentication-exempt path (the file store, _status).
+		return true
+	}
+	if actor.IsGlobalAdmin {
+		return true // pivotal-style superuser bypasses ACLs
+	}
+	check, ok := classifyRequest(r.Method, r.URL.Path)
+	if !ok {
+		return true // route carries no ACL restriction
+	}
+	// classifyRequest only succeeds for org-scoped paths, so parts[1] is the org.
+	orgName := strings.Split(strings.Trim(r.URL.Path, "/"), "/")[1]
+	org, ok := a.store.Org(orgName)
+	if !ok {
+		return true // unknown org: let the handler emit its own 404
+	}
+	if check.existColl != "" {
+		if _, ok := org.Get(check.existColl, check.existKey); !ok {
+			writeError(w, http.StatusNotFound, check.existMsg)
+			return false
+		}
+	}
+	if !actorAllowed(org, actor, check.aclType, check.aclName, check.perm) {
+		writeError(w, http.StatusForbidden, "missing "+check.perm+" permission")
+		return false
+	}
+	return true
+}
+
+// authzCheck describes the authorization a request must pass: holding perm on
+// the object identified by aclType/aclName. When existColl is non-empty the
+// object's existence is verified first (returning a 404 with existMsg if it is
+// missing) so that, per Chef, a missing object reports 404 rather than leaking
+// 403 to an actor that lacks permission.
+type authzCheck struct {
+	aclType, aclName, perm        string
+	existColl, existKey, existMsg string
+}
+
+// enforceSegs are the generic object collections whose container ACL governs
+// list/create and whose per-object ACL governs item operations.
+var enforceSegs = map[string]bool{
+	"nodes": true, "roles": true, "environments": true, "clients": true,
+	"groups": true, "containers": true, "policies": true, "policy_groups": true,
+}
+
+// existenceSegs are the subset of enforceSegs stored one-key-per-object under a
+// collection named after the segment, so the middleware can check existence
+// (and report Chef's 404) before authorization.
+var existenceSegs = map[string]bool{
+	"nodes": true, "roles": true, "environments": true,
+	"clients": true, "groups": true, "containers": true,
+}
+
+// classifyRequest maps an org-scoped request to the authorization it requires,
+// or reports ok=false for requests that carry no ACL restriction (search, the
+// authenticate endpoints, sandbox/file uploads, association management, and
+// server-global routes), which are allowed through unchanged.
+func classifyRequest(method, path string) (*authzCheck, bool) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) < 2 || parts[0] != "organizations" || parts[1] == "" {
+		return nil, false // not an org-scoped path
+	}
+	org, rest := parts[1], parts[2:]
+	read := method == http.MethodGet || method == http.MethodHead
+
+	// ACL endpoints (/.../_acl[/{perm}]) require grant on the target object.
+	if i := slices.Index(rest, "_acl"); i >= 0 {
+		switch obj := rest[:i]; len(obj) {
+		case 0:
+			return &authzCheck{aclType: "organizations", aclName: org, perm: "grant"}, true
+		case 2:
+			return &authzCheck{aclType: obj[0], aclName: obj[1], perm: "grant"}, true
+		}
+		return nil, false
+	}
+
+	if len(rest) == 0 { // /organizations/{org}
+		if read {
+			return &authzCheck{aclType: "organizations", aclName: org, perm: "read"}, true
+		}
+		return nil, false
+	}
+
+	switch seg := rest[0]; {
+	case seg == "data":
+		return classifyDataBag(method, rest, read)
+	case seg == "cookbooks" || seg == "cookbook_artifacts":
+		return classifyCookbook(method, seg, rest, read)
+	case enforceSegs[seg]:
+		return classifyGeneric(method, seg, rest, read)
+	}
+	return nil, false
+}
+
+// classifyGeneric handles the standard object collections (container ACL for
+// list/create, object ACL for item operations).
+func classifyGeneric(method, seg string, rest []string, read bool) (*authzCheck, bool) {
+	switch len(rest) {
+	case 1:
+		switch {
+		case read:
+			return &authzCheck{aclType: "containers", aclName: seg, perm: "read"}, true
+		case method == http.MethodPost:
+			return &authzCheck{aclType: "containers", aclName: seg, perm: "create"}, true
+		}
+	case 2:
+		name := rest[1]
+		perm, ok := itemPerm(method)
+		if !ok {
+			return nil, false
+		}
+		c := &authzCheck{aclType: seg, aclName: name, perm: perm}
+		if existenceSegs[seg] {
+			c.existColl, c.existKey, c.existMsg = seg, name, "Cannot find "+seg+" "+name
+		}
+		return c, true
+	}
+	return nil, false
+}
+
+// classifyCookbook handles cookbooks and cookbook_artifacts, which are
+// versioned: the cookbook object's ACL governs all of its versions, and the
+// container governs the collection and the _latest/_recipes pseudo-endpoints.
+func classifyCookbook(method, seg string, rest []string, read bool) (*authzCheck, bool) {
+	switch len(rest) {
+	case 1:
+		if read {
+			return &authzCheck{aclType: "containers", aclName: seg, perm: "read"}, true
+		}
+	case 2:
+		if name := rest[1]; strings.HasPrefix(name, "_") {
+			if read {
+				return &authzCheck{aclType: "containers", aclName: seg, perm: "read"}, true
+			}
+		} else if read {
+			return &authzCheck{aclType: seg, aclName: name, perm: "read"}, true
+		}
+	case 3:
+		name := rest[1]
+		perm, ok := itemPerm(method)
+		if !ok {
+			return nil, false
+		}
+		return &authzCheck{aclType: seg, aclName: name, perm: perm}, true
+	}
+	return nil, false
+}
+
+// classifyDataBag handles data bags, whose items share the bag object's ACL.
+// The "data" container governs the collection; the bag's existence (not the
+// item's) is what the middleware checks before authorizing item operations.
+func classifyDataBag(method string, rest []string, read bool) (*authzCheck, bool) {
+	bagExist := func(bag string) (string, string, string) {
+		return dataBagsColl, bag, "Cannot find data bag " + bag
+	}
+	switch len(rest) {
+	case 1:
+		switch {
+		case read:
+			return &authzCheck{aclType: "containers", aclName: "data", perm: "read"}, true
+		case method == http.MethodPost:
+			return &authzCheck{aclType: "containers", aclName: "data", perm: "create"}, true
+		}
+	case 2:
+		bag := rest[1]
+		perm := map[string]string{http.MethodGet: "read", http.MethodHead: "read", http.MethodPost: "update", http.MethodDelete: "delete"}[method]
+		if perm == "" {
+			return nil, false
+		}
+		c := &authzCheck{aclType: "data", aclName: bag, perm: perm}
+		c.existColl, c.existKey, c.existMsg = bagExist(bag)
+		return c, true
+	case 3:
+		bag := rest[1]
+		perm := map[string]string{http.MethodGet: "read", http.MethodHead: "read", http.MethodPut: "update", http.MethodDelete: "update"}[method]
+		if perm == "" {
+			return nil, false
+		}
+		c := &authzCheck{aclType: "data", aclName: bag, perm: perm}
+		c.existColl, c.existKey, c.existMsg = bagExist(bag)
+		return c, true
+	}
+	return nil, false
+}
+
+// itemPerm maps an HTTP method to the permission needed on an individual object.
+func itemPerm(method string) (string, bool) {
+	switch method {
+	case http.MethodGet, http.MethodHead:
+		return "read", true
+	case http.MethodPut:
+		return "update", true
+	case http.MethodDelete:
+		return "delete", true
+	}
+	return "", false
+}
+
+// This file implements optional ACL enforcement. When enabled (the server's
+// -enforce-acls flag), requests are checked against the target object's ACL and
+// the actor's transitive group membership before reaching the handler. When
+// disabled, none of this runs and every authenticated actor is permitted — the
+// permissive default that keeps test pipelines friction-free.
+
+// Actor is the authenticated identity a request is authorized against. It is
+// populated by the authentication layer and carried in the request context.
+type Actor struct {
+	Name string
+	// IsClient distinguishes an org-scoped client from a global user, which
+	// determines whether membership is matched against a group's clients[] or
+	// users[] list.
+	IsClient bool
+	// IsGlobalAdmin marks a global user with admin:true — Chef's "pivotal"
+	// superuser, which bypasses ACL checks entirely.
+	IsGlobalAdmin bool
+}
+
+// actorGroups returns the set of group names the actor belongs to, expanding
+// nested group membership transitively (a group that lists another group in its
+// groups[] inherits that group's members). Cycles terminate because a group is
+// only ever added to the result once.
+func actorGroups(org *store.Org, actor Actor) map[string]bool {
+	type rec struct{ users, clients, groups []string }
+	all := map[string]rec{}
+	for _, name := range org.Keys("groups") {
+		raw, ok := org.Get("groups", name)
+		if !ok {
+			continue
+		}
+		var g map[string]any
+		if json.Unmarshal(raw, &g) != nil {
+			continue
+		}
+		all[name] = rec{anyStrings(g["users"]), anyStrings(g["clients"]), anyStrings(g["groups"])}
+	}
+
+	member := map[string]bool{}
+	var queue []string
+	add := func(name string) {
+		if !member[name] {
+			member[name] = true
+			queue = append(queue, name)
+		}
+	}
+
+	// Seed with the groups that list the actor directly.
+	for name, g := range all {
+		direct := g.users
+		if actor.IsClient {
+			direct = g.clients
+		}
+		if slices.Contains(direct, actor.Name) {
+			add(name)
+		}
+	}
+	// Climb: any group that nests a member group is itself a member.
+	for len(queue) > 0 {
+		g := queue[0]
+		queue = queue[1:]
+		for name, h := range all {
+			if !member[name] && slices.Contains(h.groups, g) {
+				add(name)
+			}
+		}
+	}
+	return member
+}
+
+// actorAllowed reports whether the actor holds perm on the object identified by
+// aclType/aclName, via a direct actor entry or any group it transitively
+// belongs to.
+func actorAllowed(org *store.Org, actor Actor, aclType, aclName, perm string) bool {
+	acl := loadACL(org, aclType, aclName)
+	ace, _ := acl[perm].(map[string]any)
+	if ace == nil {
+		return false
+	}
+	if slices.Contains(anyStrings(ace["actors"]), actor.Name) {
+		return true
+	}
+	groups := anyStrings(ace["groups"])
+	if len(groups) == 0 {
+		return false
+	}
+	member := actorGroups(org, actor)
+	for _, g := range groups {
+		if member[g] {
+			return true
+		}
+	}
+	return false
+}
+
+// anyStrings coerces a JSON-decoded array into a []string. It accepts both
+// []any (parsed from stored JSON) and []string (the in-memory default ACL
+// literals), dropping non-string elements.
+func anyStrings(v any) []string {
+	switch arr := v.(type) {
+	case []string:
+		return arr
+	case []any:
+		out := make([]string, 0, len(arr))
+		for _, e := range arr {
+			if s, ok := e.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
