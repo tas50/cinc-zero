@@ -46,8 +46,8 @@ install:
 test:
 	go test ./... -race -cover
 
-## conformance: drive a real Cinc client (knife) against cinc-zero; needs
-## cinc-workstation installed (see https://omnitruck.cinc.sh/install.sh)
+## conformance: drive the real knife CLI (from Cinc Workstation) against
+## cinc-zero; needs knife installed (see https://omnitruck.cinc.sh/install.sh)
 conformance:
 	go test -tags conformance ./conformance/ -v
 

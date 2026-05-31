@@ -84,16 +84,17 @@ byte-for-byte compatibility with Chef clients.
 
 ### Conformance
 
-A build-tagged suite drives a **real Cinc client** (`knife`) against an
-in-process cinc-zero server, exercising signed reads/writes, search, and the
-cookbook sandbox/upload flow:
+A build-tagged suite drives the real **`knife` CLI** (from Cinc Workstation)
+against an in-process cinc-zero server, exercising signed reads/writes, search,
+and the cookbook sandbox/upload flow:
 
 ```sh
-make conformance        # needs cinc-workstation: https://omnitruck.cinc.sh/install.sh
+make conformance        # needs knife from Cinc Workstation: https://omnitruck.cinc.sh/install.sh
 ```
 
 It skips automatically when no runnable `knife` is present, and runs in CI
-(`.github/workflows/conformance.yml`) after installing Cinc via omnitruck.
+(`.github/workflows/conformance.yml`) after installing Cinc Workstation via
+omnitruck.
 
 ## License
 
