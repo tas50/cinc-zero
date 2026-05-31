@@ -7,10 +7,98 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"sync"
 
 	"github.com/tas50/cinc-zero/internal/search"
 	"github.com/tas50/cinc-zero/internal/store"
 )
+
+// searchCache memoizes the flattened searchable view of stored documents.
+//
+// Flattening (and the node attribute-precedence merge) is the dominant per-query
+// cost, and a collection is usually searched far more often than it is written.
+// Each entry is validated against the store's backing slice by identity: the
+// store never mutates a value in place (Put writes a fresh slice), so an entry
+// whose raw slice still aliases the stored one is known current. A write
+// replaces the slice, so the stale entry simply fails the identity check and is
+// recomputed — no explicit invalidation is needed. Entries for deleted objects
+// linger but are bounded by the set of distinct keys ever searched; cinc-zero
+// is a short-lived in-memory test server, so this is acceptable.
+type searchCache struct {
+	mu sync.Mutex
+	m  map[string]searchEntry
+}
+
+type searchEntry struct {
+	raw    []byte // identity-checked against the current stored slice
+	merged map[string]any
+	fields map[string][]string
+}
+
+func newSearchCache() *searchCache {
+	return &searchCache{m: make(map[string]searchEntry)}
+}
+
+// searchDoc returns the searchable view of a stored document: its merged form
+// (a node's attribute-precedence merge when mergeAttrs is set, otherwise the
+// decoded object) and its flattened field map. Results are cached and reused
+// while the underlying stored bytes are unchanged. ok is false when raw is not
+// decodable JSON, in which case the caller skips the document.
+func (a *API) searchDoc(coll, id string, raw []byte, mergeAttrs bool) (merged map[string]any, fields map[string][]string, ok bool) {
+	key := coll + "\x00" + id
+
+	a.search.mu.Lock()
+	if e, hit := a.search.m[key]; hit && sameBytes(e.raw, raw) {
+		a.search.mu.Unlock()
+		return e.merged, e.fields, true
+	}
+	a.search.mu.Unlock()
+
+	var doc map[string]any
+	if json.Unmarshal(raw, &doc) != nil {
+		return nil, nil, false
+	}
+	searchable := doc
+	if mergeAttrs {
+		searchable = nodeSearchDoc(doc)
+	}
+	fields = search.Flatten(searchable)
+
+	a.search.mu.Lock()
+	a.search.m[key] = searchEntry{raw: raw, merged: searchable, fields: fields}
+	a.search.mu.Unlock()
+	return searchable, fields, true
+}
+
+// sameBytes reports whether two slices share the same backing array (and length),
+// i.e. are the identical stored value rather than merely equal in content.
+func sameBytes(a, b []byte) bool {
+	return len(a) == len(b) && (len(a) == 0 || &a[0] == &b[0])
+}
+
+// match is one search hit: its id, the raw stored object (returned verbatim for
+// whole-object results), and its merged form (for partial-search projection).
+type match struct {
+	id     string
+	raw    json.RawMessage
+	merged map[string]any
+}
+
+// collectMatches scans an index's collection and returns the documents matching
+// query, sorted by id. It reads each document copy-free under a single lock and
+// reuses cached flattened views for unchanged objects.
+func (a *API) collectMatches(org *store.Org, idx searchIndex, query search.Query) []match {
+	var matches []match
+	org.Range(idx.collection, func(id string, raw []byte) bool {
+		merged, fields, ok := a.searchDoc(idx.collection, id, raw, idx.mergeAttrs)
+		if ok && query.Matches(fields) {
+			matches = append(matches, match{id: id, raw: raw, merged: merged})
+		}
+		return true
+	})
+	sort.Slice(matches, func(i, j int) bool { return matches[i].id < matches[j].id })
+	return matches
+}
 
 // Search is served in-process: matching objects are flattened the way Chef's
 // indexer would and filtered by a parsed Solr query. The built-in indexes are
@@ -103,30 +191,7 @@ func (a *API) runSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	type match struct {
-		id     string
-		raw    json.RawMessage
-		merged map[string]any
-	}
-	var matches []match
-	for _, id := range org.Keys(idx.collection) {
-		raw, ok := org.View(idx.collection, id)
-		if !ok {
-			continue
-		}
-		var doc map[string]any
-		if json.Unmarshal(raw, &doc) != nil {
-			continue
-		}
-		searchable := doc
-		if idx.mergeAttrs {
-			searchable = nodeSearchDoc(doc)
-		}
-		if query.Matches(search.Flatten(searchable)) {
-			matches = append(matches, match{id: id, raw: raw, merged: searchable})
-		}
-	}
-	sort.Slice(matches, func(i, j int) bool { return matches[i].id < matches[j].id })
+	matches := a.collectMatches(org, idx, query)
 
 	start := queryInt(r, "start", 0)
 	rows := queryInt(r, "rows", defaultSearchRows)

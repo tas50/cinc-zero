@@ -149,6 +149,23 @@ func (o *Org) View(coll, key string) ([]byte, bool) {
 	return val, ok
 }
 
+// Range calls fn for each key/value in coll, in unspecified order, while
+// holding the read lock for the whole iteration — one lock acquisition instead
+// of the Keys()+per-key-Get pattern's N+1. The raw slice passed to fn is the
+// stored backing slice (read-only, like View): fn must not mutate or retain it,
+// and must not call back into a mutating store method (it would deadlock on the
+// held lock). Returning false from fn stops iteration early. Callers that need
+// sorted order must sort the values they collect.
+func (o *Org) Range(coll string, fn func(key string, raw []byte) bool) {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	for k, v := range o.data[coll] {
+		if !fn(k, v) {
+			return
+		}
+	}
+}
+
 // Delete removes coll/key, returning the removed value and whether it existed.
 func (o *Org) Delete(coll, key string) ([]byte, bool) {
 	o.mu.Lock()
