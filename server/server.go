@@ -189,6 +189,10 @@ func (s *Server) Start() error {
 			_ = err
 		}
 	}()
+
+	// Warm the serving path so the first real client request is not the one that
+	// pays for cold connection handling, code paths, pools, and GC heap growth.
+	s.prewarm()
 	return nil
 }
 
