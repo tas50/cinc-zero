@@ -145,8 +145,8 @@ func TestAPIVersionNonNumericRejected(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("non-numeric version = %d, want 400; body %s", resp.StatusCode, body)
+	if resp.StatusCode != http.StatusNotAcceptable {
+		t.Fatalf("non-numeric version = %d, want 406; body %s", resp.StatusCode, body)
 	}
 	var e struct {
 		Error []string `json:"error"`
