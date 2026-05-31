@@ -56,6 +56,14 @@ func CreateOrganization(st *store.Store, name, fullName string) ([]byte, error) 
 		validator, validator, string(pubPEM))
 	org.Put("clients", validator, []byte(clientDoc))
 
+	// Grant the validator create on the clients container, mirroring a real
+	// org where the validator key can register new clients/nodes. This is
+	// structural until ACL enforcement is enabled, at which point it lets a
+	// freshly bootstrapped org behave like a real one.
+	clientsACL := defaultACL()
+	clientsACL["create"] = map[string]any{"actors": []string{validator}, "groups": []string{"admins", "users"}}
+	org.Put("acls", aclKey("containers", "clients"), mustEncode(clientsACL))
+
 	return auth.EncodePrivateKeyPEM(key), nil
 }
 

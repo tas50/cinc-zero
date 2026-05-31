@@ -36,6 +36,12 @@ type Options struct {
 	// DisableAuth skips signature verification entirely (useful for tests that
 	// do not want to sign requests).
 	DisableAuth bool
+	// EnforceACL turns on authorization enforcement: object ACLs and group
+	// membership actually gate requests, and unauthorized operations return
+	// 403. Defaults to false (every authenticated actor is permitted), which
+	// keeps existing test pipelines unaffected. Requires authentication, so it
+	// cannot be combined with DisableAuth.
+	EnforceACL bool
 	// SkewSeconds is the allowed clock skew for request timestamps. Defaults to
 	// 900 (15 minutes).
 	SkewSeconds int
@@ -82,6 +88,9 @@ type Server struct {
 // not begin listening; call Start for that.
 func New(opts Options) (*Server, error) {
 	opts.withDefaults()
+	if opts.DisableAuth && opts.EnforceACL {
+		return nil, errors.New("EnforceACL requires authentication; do not set DisableAuth")
+	}
 	st := store.New()
 
 	// Bootstrap the admin user with a fresh key pair.
@@ -122,7 +131,7 @@ func New(opts Options) (*Server, error) {
 		adminKey:      auth.EncodePrivateKeyPEM(key),
 		validatorKeys: validatorKeys,
 	}
-	handler := api.New(st).Handler()
+	handler := api.New(st, api.WithACLEnforcement(opts.EnforceACL)).Handler()
 	if !opts.DisableAuth {
 		handler = s.authMiddleware(handler)
 	}

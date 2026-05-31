@@ -8,11 +8,12 @@ import (
 	"github.com/tas50/cinc-zero/internal/store"
 )
 
-// ACLs in cinc-zero are structural, not enforced (matching the permissive authz
-// model): every object exposes a well-formed five-permission ACL that tooling
-// such as `knife acl` can read and write, but access is never actually denied.
-// ACLs are stored per object in the "acls" collection keyed by "type/name"; an
-// object with no stored ACL reports a sensible permissive default.
+// Every object exposes a well-formed five-permission ACL that tooling such as
+// `knife acl` can read and write. ACLs are stored per object in the "acls"
+// collection keyed by "type/name"; an object with no stored ACL reports a
+// sensible permissive default. By default these ACLs are structural only — no
+// request is denied — but they become enforced when the server is started with
+// ACL enforcement enabled (see authz_enforce.go).
 
 var aclPerms = []string{"create", "read", "update", "delete", "grant"}
 
