@@ -32,8 +32,8 @@ func (a *API) registerServerEndpoints(mux *http.ServeMux) {
 func (a *API) serverAPIVersion(w http.ResponseWriter, r *http.Request) {
 	requested, _ := parseAPIVersion(r.Header.Get("X-Ops-Server-API-Version"))
 	writeJSON(w, http.StatusOK, map[string]int{
-		"min_version":      apiVersionMin,
-		"max_version":      apiVersionMax,
+		"min_api_version":  apiVersionMin,
+		"max_api_version":  apiVersionMax,
 		"request_version":  requested,
 		"response_version": requested,
 	})
