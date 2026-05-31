@@ -21,8 +21,8 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// System paths (e.g. /_status) and the cookbook file store are
 		// unauthenticated: in real Chef the sandbox hands back pre-signed
-		// bookshelf URLs that knife/chef-client PUT/GET without Mixlib signing,
-		// so the file store must accept those requests directly.
+		// bookshelf URLs that knife/chef-client/cinc-client PUT/GET without
+		// Mixlib signing, so the file store must accept those requests directly.
 		if api.SystemPaths[r.URL.Path] || isFileStorePath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
