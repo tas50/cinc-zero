@@ -3,11 +3,12 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/tas50/cinc-zero/internal/store"
 )
 
 // User↔organization association. A global user is associated with an org by
-// recording their username in the org's "association_users" collection. (The
-// invite-based association_requests flow is a separate, future increment.)
+// recording their username in the org's "association_users" collection.
 
 const assocColl = "association_users"
 
@@ -19,9 +20,29 @@ func (a *API) registerAssociationRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /users/{user}/organizations", a.listUserOrgs)
 }
 
+// orgViewAllowed reports whether the request's actor may view this org's
+// membership. With no actor (auth disabled / API-layer) everything is allowed;
+// the bootstrap superuser always may; otherwise the actor must currently be a
+// member of the org. A non-member — for example a user who was removed — is
+// refused with 403, matching Chef Infra Server.
+func (a *API) orgViewAllowed(w http.ResponseWriter, r *http.Request, org *store.Org) bool {
+	actor, ok := actorFromContext(r.Context())
+	if !ok || actor.IsGlobalAdmin {
+		return true
+	}
+	if _, ok := org.Get(assocColl, actor.Name); ok {
+		return true
+	}
+	writeError(w, http.StatusForbidden, "You are not a member of this organization.")
+	return false
+}
+
 func (a *API) listOrgUsers(w http.ResponseWriter, r *http.Request) {
 	org := a.org(w, r)
 	if org == nil {
+		return
+	}
+	if !a.orgViewAllowed(w, r, org) {
 		return
 	}
 	out := make([]map[string]any, 0)
@@ -54,6 +75,11 @@ func (a *API) associateUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Cannot find user "+username)
 		return
 	}
+	// Associating a user who is already a member is a conflict.
+	if _, ok := org.Get(assocColl, username); ok {
+		writeStringError(w, http.StatusConflict, "The association already exists.")
+		return
+	}
 	org.Put(assocColl, username, mustEncode(map[string]any{"username": username}))
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"uri": requestBaseURL(r) + "/organizations/" + org.Name() + "/users/" + username,
@@ -63,6 +89,9 @@ func (a *API) associateUser(w http.ResponseWriter, r *http.Request) {
 func (a *API) getOrgUser(w http.ResponseWriter, r *http.Request) {
 	org := a.org(w, r)
 	if org == nil {
+		return
+	}
+	if !a.orgViewAllowed(w, r, org) {
 		return
 	}
 	user := r.PathValue("user")
