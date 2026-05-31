@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -94,5 +95,98 @@ func TestAPIVersionHeader(t *testing.T) {
 	}
 	if got.Header.Get("X-Ops-Server-API-Version") == "" {
 		t.Fatalf("406 response missing version header")
+	}
+}
+
+func TestServerAPIVersionEndpoint(t *testing.T) {
+	srv, _ := newTestAPI(t)
+
+	// With no header, request/response default to the minimum.
+	_, body := do(t, "GET", srv.URL+"/server_api_version", "")
+	var v struct {
+		MinVersion      int `json:"min_version"`
+		MaxVersion      int `json:"max_version"`
+		RequestVersion  int `json:"request_version"`
+		ResponseVersion int `json:"response_version"`
+	}
+	if err := json.Unmarshal([]byte(body), &v); err != nil {
+		t.Fatalf("server_api_version body not JSON: %v (%s)", err, body)
+	}
+	if v.MinVersion != 0 || v.MaxVersion != 2 {
+		t.Fatalf("bounds = %d..%d, want 0..2 (%s)", v.MinVersion, v.MaxVersion, body)
+	}
+	if v.RequestVersion != 0 || v.ResponseVersion != 0 {
+		t.Fatalf("default request/response = %d/%d, want 0/0 (%s)", v.RequestVersion, v.ResponseVersion, body)
+	}
+
+	// A requested in-range version is reflected.
+	req, _ := http.NewRequest("GET", srv.URL+"/server_api_version", nil)
+	req.Header.Set("X-Ops-Server-API-Version", "2")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
+		t.Fatal(err)
+	}
+	if v.RequestVersion != 2 || v.ResponseVersion != 2 {
+		t.Fatalf("request/response with header 2 = %d/%d, want 2/2", v.RequestVersion, v.ResponseVersion)
+	}
+}
+
+func TestAPIVersionNonNumericRejected(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	req, _ := http.NewRequest("GET", srv.URL+"/organizations/acme/nodes", nil)
+	req.Header.Set("X-Ops-Server-API-Version", "banana")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("non-numeric version = %d, want 400; body %s", resp.StatusCode, body)
+	}
+	var e struct {
+		Error []string `json:"error"`
+	}
+	if json.Unmarshal(body, &e) != nil || len(e.Error) == 0 {
+		t.Fatalf("expected JSON error array, got %s", body)
+	}
+}
+
+func TestAPIVersionTooLowRejected(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	req, _ := http.NewRequest("GET", srv.URL+"/organizations/acme/nodes", nil)
+	req.Header.Set("X-Ops-Server-API-Version", "-1")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotAcceptable {
+		t.Fatalf("too-low version = %d, want 406", resp.StatusCode)
+	}
+}
+
+func TestAPIVersionNegotiatedEcho(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	req, _ := http.NewRequest("GET", srv.URL+"/organizations/acme/nodes", nil)
+	req.Header.Set("X-Ops-Server-API-Version", "1")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var neg struct {
+		RequestVersion  string `json:"request_version"`
+		ResponseVersion string `json:"response_version"`
+	}
+	if err := json.Unmarshal([]byte(resp.Header.Get("X-Ops-Server-API-Version")), &neg); err != nil {
+		t.Fatal(err)
+	}
+	if neg.RequestVersion != "1" || neg.ResponseVersion != "1" {
+		t.Fatalf("negotiated echo = req %q resp %q, want 1/1", neg.RequestVersion, neg.ResponseVersion)
 	}
 }
