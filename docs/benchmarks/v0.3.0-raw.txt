@@ -1,0 +1,30 @@
+### Benchmark run 2026-05-31T16:17:18Z
+host: Darwin 25.5.0 arm64; go: go1.26.3; ruby: 4.0.5
+params: seed=500 warm=3000 dur=3000ms conc=10
+
+== chef-zero 15.1.11 (http://127.0.0.1:8901/organizations/acme, auth=false) ==
+seeded 500 nodes (500 newly created)
+operation            cold ms    p50 ms    p95 ms        QPS@1       QPS@10
+GET node               3.301     2.137     2.542          459          466
+GET node list          5.182     3.678     4.138          269          265
+PUT node               5.900     2.194     2.565          449          463
+search *:*            44.711    37.952    39.796           26           27
+search filtered       42.191    28.476    30.302           35           36
+
+== cinc-zero v0.3.0 (no-auth) (http://127.0.0.1:8902/organizations/acme, auth=false) ==
+seeded 500 nodes (500 newly created)
+operation            cold ms    p50 ms    p95 ms        QPS@1       QPS@10
+GET node               0.280     0.052     0.064        18181        63724
+GET node list          1.118     0.356     0.587         2649         7364
+PUT node               0.888     0.067     0.108        13634        33006
+search *:*            21.571     1.098     1.150          896         5008
+search filtered        2.382     0.650     0.687         1514         6871
+
+== cinc-zero v0.3.0 (auth) (http://127.0.0.1:8903/organizations/acme, auth=true) ==
+seeded 500 nodes (500 newly created)
+operation            cold ms    p50 ms    p95 ms        QPS@1       QPS@10
+GET node               0.538     0.104     0.148         8983        27345
+GET node list          2.060     0.407     0.668         2304         5986
+PUT node              16.277     0.118     0.167         7779        20756
+search *:*            15.176     1.145     1.214          858         4673
+search filtered        1.989     0.703     0.745         1398         6546
