@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -82,6 +83,47 @@ func TestEnforceACLEndToEnd(t *testing.T) {
 	// The admin can still read the node.
 	if code := statusOf(t, signed(t, srv, "GET", base+"/nodes/web01", "")); code != 200 {
 		t.Fatalf("admin read node = %d, want 200", code)
+	}
+}
+
+// TestEnforceACLGlobalUsers exercises the global /users gating end-to-end with
+// real signatures: a non-admin user is denied the collection but may act on its
+// own record, while the bootstrap admin (pivotal) may do either.
+func TestEnforceACLGlobalUsers(t *testing.T) {
+	srv := startServer(t, Options{Orgs: []string{"acme"}, EnforceACL: true})
+	users := srv.URL() + "/users"
+
+	// The admin creates a non-admin user and we recover its generated key.
+	resp, err := http.DefaultClient.Do(signed(t, srv, "POST", users, `{"name":"alice"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 201 {
+		t.Fatalf("admin create user = %d, want 201: %s", resp.StatusCode, body)
+	}
+	var created struct {
+		ChefKey struct {
+			PrivateKey string `json:"private_key"`
+		} `json:"chef_key"`
+	}
+	if err := json.Unmarshal(body, &created); err != nil || created.ChefKey.PrivateKey == "" {
+		t.Fatalf("no private key in create response: %s", body)
+	}
+	aliceKey := []byte(created.ChefKey.PrivateKey)
+
+	// alice (a normal user) cannot list the global users collection...
+	if code := statusOf(t, signedAs(t, "alice", aliceKey, "GET", users, "")); code != 403 {
+		t.Fatalf("alice list users = %d, want 403", code)
+	}
+	// ...but may read her own record.
+	if code := statusOf(t, signedAs(t, "alice", aliceKey, "GET", users+"/alice", "")); code != 200 {
+		t.Fatalf("alice read self = %d, want 200", code)
+	}
+	// The admin may list the collection.
+	if code := statusOf(t, signed(t, srv, "GET", users, "")); code != 200 {
+		t.Fatalf("admin list users = %d, want 200", code)
 	}
 }
 

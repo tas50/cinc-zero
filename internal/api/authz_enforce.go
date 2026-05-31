@@ -56,11 +56,24 @@ func (a *API) authorize(w http.ResponseWriter, r *http.Request) bool {
 	if !ok {
 		return true // route carries no ACL restriction
 	}
-	// classifyRequest only succeeds for org-scoped paths, so parts[1] is the org.
-	orgName := strings.Split(strings.Trim(r.URL.Path, "/"), "/")[1]
-	org, ok := a.store.Org(orgName)
-	if !ok {
-		return true // unknown org: let the handler emit its own 404
+	// A user may always act on its own global record (self-service); the global
+	// admin already returned above, so anyone else hits the superuser gate.
+	if check.allowSelf != "" && actor.Name == check.allowSelf {
+		return true
+	}
+	if check.superuserOnly {
+		writeError(w, http.StatusForbidden, "missing "+check.perm+" permission")
+		return false
+	}
+	// Global checks (the user collection and user ACLs) evaluate against the
+	// global space; org-scoped checks resolve the org from the path.
+	org := a.store.Global()
+	if !check.global {
+		// classifyRequest only succeeds for org-scoped paths, so parts[1] is the org.
+		orgName := strings.Split(strings.Trim(r.URL.Path, "/"), "/")[1]
+		if org, ok = a.store.Org(orgName); !ok {
+			return true // unknown org: let the handler emit its own 404
+		}
 	}
 	if check.existColl != "" {
 		if _, ok := org.Get(check.existColl, check.existKey); !ok {
@@ -83,6 +96,16 @@ func (a *API) authorize(w http.ResponseWriter, r *http.Request) bool {
 type authzCheck struct {
 	aclType, aclName, perm        string
 	existColl, existKey, existMsg string
+	// global evaluates the ACL against the global space (users and their ACLs)
+	// rather than an org resolved from the path.
+	global bool
+	// superuserOnly denies everyone but the global admin (who already bypassed
+	// authorization). It gates the global users collection, where perm names
+	// the operation only for the error message.
+	superuserOnly bool
+	// allowSelf names the user permitted to act on its own global record; when
+	// it matches the actor the request is allowed before the superuser gate.
+	allowSelf string
 }
 
 // enforceSegs are the generic object collections whose container ACL governs
@@ -100,12 +123,15 @@ var existenceSegs = map[string]bool{
 	"clients": true, "groups": true, "containers": true,
 }
 
-// classifyRequest maps an org-scoped request to the authorization it requires,
-// or reports ok=false for requests that carry no ACL restriction (search, the
-// authenticate endpoints, sandbox/file uploads, association management, and
-// server-global routes), which are allowed through unchanged.
+// classifyRequest maps a request to the authorization it requires, or reports
+// ok=false for requests that carry no ACL restriction (search, the authenticate
+// endpoints, sandbox/file uploads, association management, and server-global
+// routes), which are allowed through unchanged.
 func classifyRequest(method, path string) (*authzCheck, bool) {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) >= 1 && parts[0] == "users" {
+		return classifyUsers(method, parts[1:])
+	}
 	if len(parts) < 2 || parts[0] != "organizations" || parts[1] == "" {
 		return nil, false // not an org-scoped path
 	}
@@ -137,6 +163,37 @@ func classifyRequest(method, path string) (*authzCheck, bool) {
 		return classifyCookbook(method, seg, rest, read)
 	case enforceSegs[seg]:
 		return classifyGeneric(method, seg, rest, read)
+	}
+	return nil, false
+}
+
+// classifyUsers handles the global /users routes (rest is the path after
+// "users"). The collection and operations on a user are superuser-only — though
+// a user may act on its own record — while a user's _acl is governed by the
+// grant permission on that user object in the global space. User key
+// sub-endpoints carry no ACL restriction and fall through to allow-through.
+func classifyUsers(method string, rest []string) (*authzCheck, bool) {
+	switch len(rest) {
+	case 0: // /users
+		switch method {
+		case http.MethodGet, http.MethodHead:
+			return &authzCheck{superuserOnly: true, perm: "read"}, true
+		case http.MethodPost:
+			return &authzCheck{superuserOnly: true, perm: "create"}, true
+		}
+		return nil, false
+	case 1: // /users/{name}
+		name := rest[0]
+		switch method {
+		case http.MethodGet, http.MethodHead, http.MethodPut, http.MethodDelete:
+			perm := map[string]string{http.MethodGet: "read", http.MethodHead: "read", http.MethodPut: "update", http.MethodDelete: "delete"}[method]
+			return &authzCheck{superuserOnly: true, perm: perm, allowSelf: name}, true
+		}
+		return nil, false
+	}
+	// /users/{name}/_acl[/{perm}] — grant on the user object (global space).
+	if rest[1] == "_acl" {
+		return &authzCheck{global: true, aclType: "users", aclName: rest[0], perm: "grant"}, true
 	}
 	return nil, false
 }
