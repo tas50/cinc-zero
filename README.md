@@ -30,7 +30,7 @@ Compared to [chef-zero](https://github.com/chef/chef-zero), cinc-zero treats
 | Key management API (client/user named keys, v1) | ✅ |
 | `authenticate_user`, user↔org association + invite flow (`association_requests`) | ✅ |
 | Environment/role sub-endpoints (cookbook filtering, depsolve, recipes, nodes, run lists) | ✅ |
-| Server endpoints (`_stats`, `required_recipe`, `principals`, API-version negotiation) | ✅ |
+| Server endpoints (`_stats`, `license`, `required_recipe`, `principals`, API-version negotiation) | ✅ |
 | chef-repo loader (JSON objects, data bags, cookbook dirs) | ✅ |
 
 See [`docs/superpowers/specs`](docs/superpowers/specs) for the full design.
