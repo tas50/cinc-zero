@@ -66,6 +66,37 @@ func TestClientCreateAcceptsProvidedKey(t *testing.T) {
 	}
 }
 
+// TestClientCreateAcceptsNestedPublicKey accepts a BYO public key nested under
+// "chef_key" (the shape knife/cinc send): the server must use it verbatim and
+// not generate — and so must not return a private key.
+func TestClientCreateAcceptsNestedPublicKey(t *testing.T) {
+	srv, st := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	key, _ := auth.GenerateKey()
+	pub, _ := auth.EncodePublicKeyPEM(&key.PublicKey)
+	reqBody, _ := json.Marshal(map[string]any{
+		"name":     "byo",
+		"chef_key": map[string]any{"public_key": string(pub)},
+	})
+
+	resp, body := do(t, "POST", base+"/clients", string(reqBody))
+	if resp.StatusCode != 201 {
+		t.Fatalf("create status %d: %s", resp.StatusCode, body)
+	}
+	var out map[string]any
+	json.Unmarshal([]byte(body), &out)
+	if privateKeyFrom(t, out) != "" {
+		t.Fatalf("server generated a key despite a supplied public key: %s", body)
+	}
+	org, _ := st.Org("acme")
+	raw, _ := org.Get("clients", "byo")
+	var stored map[string]any
+	json.Unmarshal(raw, &stored)
+	if stored["public_key"] != string(pub) {
+		t.Fatalf("nested public key not preserved: %s", raw)
+	}
+}
+
 func TestUserCreateIsGlobal(t *testing.T) {
 	st := store.New()
 	srv := httptest.NewServer(New(st).Handler())
