@@ -17,6 +17,13 @@ const assocReqColl = "association_requests"
 
 func inviteID(user, org string) string { return user + "-" + org }
 
+// writeStringError writes an error body as a JSON object with a string "error"
+// field — the shape Chef Infra Server uses for the association / invitation
+// endpoints, distinct from the {"error":[...]} array used elsewhere.
+func writeStringError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg})
+}
+
 func (a *API) registerAssociationRequestRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /organizations/{org}/association_requests", a.listOrgInvites)
 	mux.HandleFunc("POST /organizations/{org}/association_requests", a.createInvite)
@@ -65,16 +72,22 @@ func (a *API) createInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, ok := org.Get(assocColl, user); ok {
-		writeError(w, http.StatusConflict, "The association already exists.")
+		writeStringError(w, http.StatusConflict, "The association already exists.")
 		return
 	}
 	id := inviteID(user, org.Name())
 	if _, ok := org.Get(assocReqColl, id); ok {
-		writeError(w, http.StatusConflict, "The invitation already exists.")
+		writeStringError(w, http.StatusConflict, "The invitation already exists.")
 		return
 	}
+	// Record who issued the invite so acceptance can verify they still have the
+	// authority to do so.
+	inviter := ""
+	if actor, ok := actorFromContext(r.Context()); ok {
+		inviter = actor.Name
+	}
 	org.Put(assocReqColl, id, mustEncode(map[string]any{
-		"id": id, "username": user, "orgname": org.Name(),
+		"id": id, "username": user, "orgname": org.Name(), "inviter": inviter,
 	}))
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"uri":               requestBaseURL(r) + "/organizations/" + org.Name() + "/association_requests/" + id,
@@ -90,7 +103,7 @@ func (a *API) rescindInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	raw, ok := org.Delete(assocReqColl, r.PathValue("id"))
 	if !ok {
-		writeError(w, http.StatusNotFound, "Cannot find association request: "+r.PathValue("id"))
+		writeStringError(w, http.StatusNotFound, "Cannot find association request: "+r.PathValue("id"))
 		return
 	}
 	writeRaw(w, http.StatusOK, raw)
@@ -121,15 +134,23 @@ func (a *API) userInvites(user string) []map[string]any {
 	return out
 }
 
-// respondInvite accepts or rejects an invitation. Accepting associates the user
-// with the org and adds them to its "users" group; either response clears the
-// invite. A response other than accept/reject is rejected and leaves the invite
-// intact.
+// respondInvite accepts or rejects an invitation. Only the invited user may
+// respond. Accepting associates the user with the org and adds them to its
+// "users" group; either response consumes the invite. An invite issued by
+// someone who has since lost the authority to invite can no longer be accepted.
 func (a *API) respondInvite(w http.ResponseWriter, r *http.Request) {
 	user, id := r.PathValue("user"), r.PathValue("id")
+
+	// Only the invitee may respond to their own invitation; a third party (org
+	// admin or anyone else) is forbidden. With no actor the endpoint stays open.
+	if actor, ok := actorFromContext(r.Context()); ok && actor.Name != user {
+		writeStringError(w, http.StatusForbidden, "You are not allowed to take this action.")
+		return
+	}
+
 	org, ok := a.findInvite(user, id)
 	if !ok {
-		writeError(w, http.StatusNotFound, "Cannot find association request: "+id)
+		writeStringError(w, http.StatusNotFound, "Cannot find association request: "+id)
 		return
 	}
 	var body struct {
@@ -144,6 +165,19 @@ func (a *API) respondInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if body.Response == "accept" {
+		var inv struct {
+			Inviter string `json:"inviter"`
+		}
+		if raw, ok := org.Get(assocReqColl, id); ok {
+			json.Unmarshal(raw, &inv)
+		}
+		if !a.inviterAuthorized(org, inv.Inviter) {
+			writeStringError(w, http.StatusForbidden, "The user who issued this invitation can no longer do so.")
+			return
+		}
+	}
+
 	org.Delete(assocReqColl, id)
 	if body.Response == "accept" {
 		org.Put(assocColl, user, mustEncode(map[string]any{"username": user}))
@@ -152,6 +186,36 @@ func (a *API) respondInvite(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"organization": map[string]any{"name": org.Name()},
 	})
+}
+
+// inviterAuthorized reports whether the recorded inviter may still issue
+// invitations for the org: a global superuser always may; otherwise they must
+// still exist, still be associated with the org, and still belong to its
+// "admins" group. An empty inviter (created without an authenticated actor) is
+// treated as authorized.
+func (a *API) inviterAuthorized(org *store.Org, inviter string) bool {
+	if inviter == "" {
+		return true
+	}
+	uraw, ok := a.store.Global().Get("users", inviter)
+	if !ok {
+		return false
+	}
+	var u map[string]any
+	json.Unmarshal(uraw, &u)
+	if admin, _ := u["admin"].(bool); admin {
+		return true
+	}
+	if _, ok := org.Get(assocColl, inviter); !ok {
+		return false
+	}
+	if raw, ok := org.Get("groups", "admins"); ok {
+		var g map[string]any
+		if json.Unmarshal(raw, &g) == nil && slices.Contains(anyStrings(g["users"]), inviter) {
+			return true
+		}
+	}
+	return false
 }
 
 // addUserToOrgGroup adds user to the named org group's user list (creating the
