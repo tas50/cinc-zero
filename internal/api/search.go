@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -92,10 +94,10 @@ func (a *API) runSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Partial search (POST body of result-key -> attribute path) is applied per
-	// matching row; an empty/absent body yields whole-object results.
+	// matching row; an empty or absent body yields whole-object results.
 	var partial map[string][]string
 	if r.Method == http.MethodPost {
-		if err := json.NewDecoder(r.Body).Decode(&partial); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&partial); err != nil && !errors.Is(err, io.EOF) {
 			writeError(w, http.StatusBadRequest, "invalid partial search body")
 			return
 		}
@@ -136,6 +138,10 @@ func (a *API) runSearch(w http.ResponseWriter, r *http.Request) {
 		if partial != nil {
 			data := map[string]any{}
 			for key, path := range partial {
+				if len(path) == 0 {
+					data[key] = nil // empty projection: no value for this key
+					continue
+				}
 				data[key] = traversePath(m.merged, path)
 			}
 			out = append(out, map[string]any{
