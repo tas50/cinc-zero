@@ -1,11 +1,11 @@
 //go:build conformance
 
-// Package conformance drives a real Cinc/Chef client (knife) against an
-// in-process cinc-zero server, exercising the full signed-request lifecycle:
+// Package conformance drives the real knife CLI (from Cinc Workstation) against
+// an in-process cinc-zero server, exercising the full signed-request lifecycle:
 // reads, writes, search, and the cookbook sandbox/upload flow. It is gated
 // behind the "conformance" build tag and a runnable knife binary, so it only
-// executes where a real client is installed (e.g. CI after the Cinc omnitruck
-// install). Run with: go test -tags conformance ./conformance/
+// executes where knife is installed (e.g. CI after the Cinc Workstation
+// omnitruck install). Run with: go test -tags conformance ./conformance/
 package conformance
 
 import (
