@@ -111,12 +111,51 @@ func (a *API) scopedList(segment string, scope scopeFunc) http.HandlerFunc {
 		if org == nil {
 			return
 		}
+
+		// Chef Infra Server supports exact-match filtering of the actor list by
+		// query parameter (notably GET /users?email= and
+		// ?external_authentication_uid=). When a recognized filter is present,
+		// only actors whose stored field matches exactly are returned; an
+		// unrecognized value yields an empty map rather than an error.
+		filters := map[string]string{}
+		for _, field := range []string{"email", "external_authentication_uid"} {
+			if v := r.URL.Query().Get(field); v != "" {
+				filters[field] = v
+			}
+		}
+
 		out := map[string]string{}
 		for _, name := range org.Keys(segment) {
+			if !actorMatchesFilters(org, segment, name, filters) {
+				continue
+			}
 			out[name] = objectURL(r, orgSegment(r), segment, name)
 		}
 		writeJSON(w, http.StatusOK, out)
 	}
+}
+
+// actorMatchesFilters reports whether the stored actor document satisfies every
+// supplied exact-match filter. With no filters it always matches; a missing or
+// unparseable record matches nothing.
+func actorMatchesFilters(org *store.Org, segment, name string, filters map[string]string) bool {
+	if len(filters) == 0 {
+		return true
+	}
+	raw, ok := org.Get(segment, name)
+	if !ok {
+		return false
+	}
+	var doc map[string]any
+	if json.Unmarshal(raw, &doc) != nil {
+		return false
+	}
+	for field, want := range filters {
+		if got, _ := doc[field].(string); got != want {
+			return false
+		}
+	}
+	return true
 }
 
 func (a *API) scopedGet(segment string, scope scopeFunc) http.HandlerFunc {
