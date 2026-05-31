@@ -390,6 +390,7 @@ func (a *API) deleteCookbookVersion(w http.ResponseWriter, r *http.Request) {
 	}
 	var m map[string]any
 	if json.Unmarshal(raw, &m) == nil {
+		gcOrphanedBlobs(org, manifestChecksums(m))
 		injectFileURLs(m, r, org.Name())
 		writeJSON(w, http.StatusOK, m)
 		return
@@ -471,6 +472,44 @@ func manifestChecksums(m map[string]any) []string {
 		}
 	})
 	return sums
+}
+
+// referencedChecksums returns the set of file-store checksums still referenced
+// by any stored cookbook or cookbook_artifact manifest.
+func referencedChecksums(org *store.Org) map[string]bool {
+	refs := map[string]bool{}
+	for _, coll := range []string{"cookbooks", "cookbook_artifacts"} {
+		for _, key := range org.Keys(coll) {
+			raw, ok := org.Get(coll, key)
+			if !ok {
+				continue
+			}
+			var m map[string]any
+			if json.Unmarshal(raw, &m) != nil {
+				continue
+			}
+			for _, sum := range manifestChecksums(m) {
+				refs[sum] = true
+			}
+		}
+	}
+	return refs
+}
+
+// gcOrphanedBlobs deletes each candidate checksum from the file store unless it
+// is still referenced by some remaining cookbook or artifact manifest. Call it
+// after removing a manifest so its now-orphaned content becomes unavailable,
+// while content shared with another version/artifact survives.
+func gcOrphanedBlobs(org *store.Org, candidates []string) {
+	if len(candidates) == 0 {
+		return
+	}
+	referenced := referencedChecksums(org)
+	for _, sum := range candidates {
+		if !referenced[sum] {
+			org.DeleteBlob(sum)
+		}
+	}
 }
 
 func injectFileURLs(m map[string]any, r *http.Request, org string) {

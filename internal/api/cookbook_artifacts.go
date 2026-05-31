@@ -88,6 +88,15 @@ func (a *API) putArtifactVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name, ident := r.PathValue("name"), r.PathValue("identifier")
+
+	// Artifacts are content-addressed and immutable: an existing identifier is
+	// never overwritten.
+	if _, existed := org.Get("cookbook_artifacts", cookbookKey(name, ident)); existed {
+		writeError(w, http.StatusConflict,
+			"Cookbook artifact "+name+" with identifier "+ident+" already exists")
+		return
+	}
+
 	var m map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -99,15 +108,10 @@ func (a *API) putArtifactVersion(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	_, existed := org.Get("cookbook_artifacts", cookbookKey(name, ident))
 	org.Put("cookbook_artifacts", cookbookKey(name, ident), mustEncode(m))
 
-	status := http.StatusCreated
-	if existed {
-		status = http.StatusOK
-	}
 	injectFileURLs(m, r, org.Name())
-	writeJSON(w, status, m)
+	writeJSON(w, http.StatusCreated, m)
 }
 
 func (a *API) deleteArtifactVersion(w http.ResponseWriter, r *http.Request) {
@@ -123,6 +127,7 @@ func (a *API) deleteArtifactVersion(w http.ResponseWriter, r *http.Request) {
 	}
 	var m map[string]any
 	if json.Unmarshal(raw, &m) == nil {
+		gcOrphanedBlobs(org, manifestChecksums(m))
 		injectFileURLs(m, r, org.Name())
 		writeJSON(w, http.StatusOK, m)
 		return
