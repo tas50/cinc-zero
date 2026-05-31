@@ -1,0 +1,19 @@
+### Go micro-benchmarks — 2026-05-31T18:33:52Z
+host: Darwin 25.5.0 arm64  go: go1.26.3  cpu: Apple M4 Pro
+
+BenchmarkFlatten-14    	  120781	      2871 ns/op	    3464 B/op	      43 allocs/op
+BenchmarkFlatten-14    	  127350	      2868 ns/op	    3464 B/op	      43 allocs/op
+BenchmarkFlatten-14    	  126914	      2861 ns/op	    3464 B/op	      43 allocs/op
+BenchmarkListObjects-14       	    4976	     67293 ns/op	   44622 B/op	      31 allocs/op
+BenchmarkListObjects-14       	    5340	     65705 ns/op	   44619 B/op	      31 allocs/op
+BenchmarkListObjects-14       	    5566	     65972 ns/op	   44606 B/op	      31 allocs/op
+BenchmarkSearchScanCold-14    	     255	   1352089 ns/op	 2135843 B/op	   29313 allocs/op
+BenchmarkSearchScanCold-14    	     250	   1378720 ns/op	 2134925 B/op	   29311 allocs/op
+BenchmarkSearchScanCold-14    	     320	   1314716 ns/op	 2134772 B/op	   29311 allocs/op
+BenchmarkSearchScanWarm-14    	    6352	     55646 ns/op	   24368 B/op	      13 allocs/op
+BenchmarkSearchScanWarm-14    	    6200	     55035 ns/op	   24368 B/op	      13 allocs/op
+BenchmarkSearchScanWarm-14    	    6626	     55191 ns/op	   24368 B/op	      13 allocs/op
+BenchmarkServerNew1Org-14     	      30	  91566342 ns/op	 1602164 B/op	   13935 allocs/op
+BenchmarkServerNew1Org-14     	      30	 100972442 ns/op	 1750139 B/op	   15284 allocs/op
+BenchmarkServerNew3Orgs-14    	      30	 113215179 ns/op	 2910751 B/op	   24664 allocs/op
+BenchmarkServerNew3Orgs-14    	      30	 110427801 ns/op	 2723625 B/op	   22963 allocs/op
