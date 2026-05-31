@@ -129,8 +129,8 @@ func TestServerAPIVersionEndpoint(t *testing.T) {
 	// With no header, request/response default to the minimum.
 	_, body := do(t, "GET", srv.URL+"/server_api_version", "")
 	var v struct {
-		MinVersion      int `json:"min_version"`
-		MaxVersion      int `json:"max_version"`
+		MinVersion      int `json:"min_api_version"`
+		MaxVersion      int `json:"max_api_version"`
 		RequestVersion  int `json:"request_version"`
 		ResponseVersion int `json:"response_version"`
 	}
