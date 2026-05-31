@@ -58,6 +58,34 @@ func TestQueryMatch(t *testing.T) {
 	}
 }
 
+// TestIsMatchAll lets callers recognize the *:* query so they can return stored
+// documents without flattening them. Only *:* (and the equivalent *) is match-all;
+// any field constraint, existence check, or bare term is not.
+func TestIsMatchAll(t *testing.T) {
+	cases := []struct {
+		query string
+		want  bool
+	}{
+		{`*:*`, true},
+		{`*`, true},
+		{`name:web01`, false},
+		{`name:*`, false}, // field existence, not match-all
+		{`web01`, false},  // bare term
+		{`NOT name:x`, false},
+		{`*:* AND name:web01`, false},
+	}
+	for _, c := range cases {
+		q, err := Parse(c.query)
+		if err != nil {
+			t.Errorf("Parse(%q) error: %v", c.query, err)
+			continue
+		}
+		if got := IsMatchAll(q); got != c.want {
+			t.Errorf("IsMatchAll(%q) = %v, want %v", c.query, got, c.want)
+		}
+	}
+}
+
 func TestParseErrors(t *testing.T) {
 	for _, q := range []string{"", "(unclosed", "name:"} {
 		if _, err := Parse(q); err == nil {
