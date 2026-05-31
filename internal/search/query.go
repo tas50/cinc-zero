@@ -41,6 +41,14 @@ type matchAll struct{}
 
 func (matchAll) Matches(map[string][]string) bool { return true }
 
+// IsMatchAll reports whether q matches every document (the *:* query). Callers
+// can use this to return stored documents directly without flattening them,
+// since the field map is irrelevant when nothing is filtered.
+func IsMatchAll(q Query) bool {
+	_, ok := q.(matchAll)
+	return ok
+}
+
 type andQ struct{ l, r Query }
 
 func (q andQ) Matches(f map[string][]string) bool { return q.l.Matches(f) && q.r.Matches(f) }

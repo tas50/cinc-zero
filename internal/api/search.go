@@ -5,9 +5,11 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"runtime"
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	"github.com/tas50/cinc-zero/internal/search"
 	"github.com/tas50/cinc-zero/internal/store"
@@ -24,9 +26,13 @@ import (
 // recomputed — no explicit invalidation is needed. Entries for deleted objects
 // linger but are bounded by the set of distinct keys ever searched; cinc-zero
 // is a short-lived in-memory test server, so this is acceptable.
+//
+// A search scan reads one entry per stored document, so the hit path must not
+// contend: the cache is a sync.Map, giving lock-free reads (the common case is a
+// hit on unchanged content) while a first-flatten or post-write recompute does a
+// single Store.
 type searchCache struct {
-	mu sync.Mutex
-	m  map[string]searchEntry
+	m sync.Map // key string -> searchEntry
 }
 
 type searchEntry struct {
@@ -36,7 +42,7 @@ type searchEntry struct {
 }
 
 func newSearchCache() *searchCache {
-	return &searchCache{m: make(map[string]searchEntry)}
+	return &searchCache{}
 }
 
 // searchDoc returns the searchable view of a stored document: its merged form
@@ -47,12 +53,11 @@ func newSearchCache() *searchCache {
 func (a *API) searchDoc(coll, id string, raw []byte, mergeAttrs bool) (merged map[string]any, fields map[string][]string, ok bool) {
 	key := coll + "\x00" + id
 
-	a.search.mu.Lock()
-	if e, hit := a.search.m[key]; hit && sameBytes(e.raw, raw) {
-		a.search.mu.Unlock()
-		return e.merged, e.fields, true
+	if v, hit := a.search.m.Load(key); hit {
+		if e := v.(searchEntry); sameBytes(e.raw, raw) {
+			return e.merged, e.fields, true
+		}
 	}
-	a.search.mu.Unlock()
 
 	var doc map[string]any
 	if json.Unmarshal(raw, &doc) != nil {
@@ -64,10 +69,21 @@ func (a *API) searchDoc(coll, id string, raw []byte, mergeAttrs bool) (merged ma
 	}
 	fields = search.Flatten(searchable)
 
-	a.search.mu.Lock()
-	a.search.m[key] = searchEntry{raw: raw, merged: searchable, fields: fields}
-	a.search.mu.Unlock()
+	a.search.m.Store(key, searchEntry{raw: raw, merged: searchable, fields: fields})
 	return searchable, fields, true
+}
+
+// searchDocCached returns the cached searchable view for a document if one is
+// present and still current (its stored slice unchanged), without computing on a
+// miss. The scan uses this for the cheap hit path so the expensive flatten of
+// missing entries can be batched and parallelized separately.
+func (a *API) searchDocCached(coll, id string, raw []byte) (fields map[string][]string, ok bool) {
+	if v, hit := a.search.m.Load(coll + "\x00" + id); hit {
+		if e := v.(searchEntry); sameBytes(e.raw, raw) {
+			return e.fields, true
+		}
+	}
+	return nil, false
 }
 
 // sameBytes reports whether two slices share the same backing array (and length),
@@ -76,28 +92,107 @@ func sameBytes(a, b []byte) bool {
 	return len(a) == len(b) && (len(a) == 0 || &a[0] == &b[0])
 }
 
-// match is one search hit: its id, the raw stored object (returned verbatim for
-// whole-object results), and its merged form (for partial-search projection).
+// match is one search hit: its id and the raw stored object (returned verbatim
+// for whole-object results). A partial-search projection needs the merged view,
+// but only for the rows in the result window, so it is re-fetched there from the
+// flatten cache rather than carried on every match.
 type match struct {
-	id     string
-	raw    json.RawMessage
-	merged map[string]any
+	id  string
+	raw json.RawMessage
 }
 
-// collectMatches scans an index's collection and returns the documents matching
-// query, sorted by id. It reads each document copy-free under a single lock and
-// reuses cached flattened views for unchanged objects.
-func (a *API) collectMatches(org *store.Org, idx searchIndex, query search.Query) []match {
+// collectAll returns every document in the index as a match, sorted by id,
+// without decoding or flattening any of them. This is the match-all (*:*) fast
+// path for whole-object results: the field map is never consulted, so the
+// dominant flatten cost is skipped entirely.
+func (a *API) collectAll(org *store.Org, idx searchIndex) []match {
 	var matches []match
 	org.Range(idx.collection, func(id string, raw []byte) bool {
-		merged, fields, ok := a.searchDoc(idx.collection, id, raw, idx.mergeAttrs)
-		if ok && query.Matches(fields) {
-			matches = append(matches, match{id: id, raw: raw, merged: merged})
-		}
+		matches = append(matches, match{id: id, raw: raw})
 		return true
 	})
 	sort.Slice(matches, func(i, j int) bool { return matches[i].id < matches[j].id })
 	return matches
+}
+
+// collectMatches scans an index's collection and returns the documents matching
+// query, sorted by id. Cached documents are matched inline on the cheap hit path;
+// the expensive part — decoding, merging, and flattening uncached documents — is
+// the dominant cost of a cold scan, so it is batched and fanned out across
+// workers. Documents are read copy-free and the flatten cache it populates makes
+// later scans cheap. Splitting the work this way keeps warm scans free of any
+// goroutine overhead while still parallelizing the cold flatten.
+func (a *API) collectMatches(org *store.Org, idx searchIndex, query search.Query) []match {
+	type doc struct {
+		id  string
+		raw []byte
+	}
+	var matches []match
+	var misses []doc
+	org.Range(idx.collection, func(id string, raw []byte) bool {
+		if fields, ok := a.searchDocCached(idx.collection, id, raw); ok {
+			if query.Matches(fields) {
+				matches = append(matches, match{id: id, raw: raw})
+			}
+		} else {
+			// raw is the stored backing slice (read-only); safe to flatten outside
+			// the lock and concurrently, since the store never mutates it in place.
+			misses = append(misses, doc{id, raw})
+		}
+		return true
+	})
+
+	if len(misses) > 0 {
+		hit := make([]bool, len(misses))
+		parallelFor(len(misses), func(i int) {
+			_, fields, ok := a.searchDoc(idx.collection, misses[i].id, misses[i].raw, idx.mergeAttrs)
+			if ok && query.Matches(fields) {
+				hit[i] = true
+			}
+		})
+		for i, d := range misses {
+			if hit[i] {
+				matches = append(matches, match{id: d.id, raw: d.raw})
+			}
+		}
+	}
+
+	sort.Slice(matches, func(i, j int) bool { return matches[i].id < matches[j].id })
+	return matches
+}
+
+// parallelFor runs fn for each index 0..n-1. Small scans run serially to avoid
+// goroutine overhead; larger ones are fanned out across GOMAXPROCS workers
+// pulling indices off a shared counter. fn must be safe to call concurrently for
+// distinct indices (each writes only its own slot).
+func parallelFor(n int, fn func(i int)) {
+	const serialThreshold = 64
+	workers := runtime.GOMAXPROCS(0)
+	if n < serialThreshold || workers <= 1 {
+		for i := range n {
+			fn(i)
+		}
+		return
+	}
+	if workers > n {
+		workers = n
+	}
+	var next atomic.Int64
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			for {
+				i := int(next.Add(1)) - 1
+				if i >= n {
+					return
+				}
+				fn(i)
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 // Search is served in-process: matching objects are flattened the way Chef's
@@ -191,7 +286,15 @@ func (a *API) runSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	matches := a.collectMatches(org, idx, query)
+	// Whole-object match-all needs no field map, so skip flattening entirely and
+	// return the stored documents directly; every other query (and any partial
+	// projection, which needs the merged view) flattens and filters.
+	var matches []match
+	if partial == nil && search.IsMatchAll(query) {
+		matches = a.collectAll(org, idx)
+	} else {
+		matches = a.collectMatches(org, idx, query)
+	}
 
 	start := queryInt(r, "start", 0)
 	rows := queryInt(r, "rows", defaultSearchRows)
@@ -201,13 +304,16 @@ func (a *API) runSearch(w http.ResponseWriter, r *http.Request) {
 	out := make([]any, 0, len(window))
 	for _, m := range window {
 		if partial != nil {
+			// Re-fetch the merged view for this row only (a flatten-cache hit, since
+			// collectMatches flattened every match); the full result set is not merged.
+			merged, _, _ := a.searchDoc(idx.collection, m.id, m.raw, idx.mergeAttrs)
 			data := map[string]any{}
 			for key, path := range partial {
 				if len(path) == 0 {
 					data[key] = nil // empty projection: no value for this key
 					continue
 				}
-				data[key] = traversePath(m.merged, path)
+				data[key] = traversePath(merged, path)
 			}
 			out = append(out, map[string]any{
 				"url":  idx.urlFor(r, org.Name(), m.id),

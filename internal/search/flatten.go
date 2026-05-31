@@ -16,20 +16,31 @@ import (
 // to match Solr's default text analysis (so queries are case-insensitive).
 func Flatten(doc map[string]any) map[string][]string {
 	fields := map[string][]string{}
+	// path segments are already lowercased during descent, so add only lowercases
+	// the value and builds each suffix key right-to-left ("baz", "bar_baz",
+	// "foo_bar_baz") — reusing the shorter suffix instead of re-joining and
+	// re-lowercasing the whole path for every suffix.
 	add := func(path []string, val string) {
 		val = strings.ToLower(val)
-		for i := range path {
-			key := strings.ToLower(strings.Join(path[i:], "_"))
+		key := ""
+		for i := len(path) - 1; i >= 0; i-- {
+			if key == "" {
+				key = path[i]
+			} else {
+				key = path[i] + "_" + key
+			}
 			fields[key] = append(fields[key], val)
 		}
 	}
+	// path is a single buffer grown and shrunk as the walk descends and returns
+	// (depth-first, so siblings safely reuse the same backing array). add reads it
+	// synchronously and never retains it, so no per-level copy is needed.
 	var walk func(path []string, v any)
 	walk = func(path []string, v any) {
 		switch t := v.(type) {
 		case map[string]any:
 			for k, vv := range t {
-				child := append(append([]string{}, path...), k)
-				walk(child, vv)
+				walk(append(path, strings.ToLower(k)), vv)
 			}
 		case []any:
 			for _, vv := range t {
@@ -45,7 +56,7 @@ func Flatten(doc map[string]any) map[string][]string {
 			}
 		}
 	}
-	walk(nil, doc)
+	walk(make([]string, 0, 8), doc)
 	return fields
 }
 

@@ -75,6 +75,12 @@ func main() {
 	fmt.Printf("== %s (%s, auth=%v) ==\n", *label, *base, signer.on)
 	seed(*seedN)
 
+	// The cold sample of each op is its first request after seeding. cinc-zero's
+	// match-all (*:*) search returns whole objects without flattening, so the
+	// "search *:*" op does not warm the node flatten cache: the later "search
+	// filtered" cold therefore measures a genuine cold index build rather than
+	// inheriting a cache the *:* op filled. (chef-zero re-flattens every query, so
+	// its cold numbers are independent regardless of order.)
 	ops := []op{
 		{"GET node", "GET", "/nodes/node0", ""},
 		{"GET node list", "GET", "/nodes", ""},

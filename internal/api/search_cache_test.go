@@ -1,14 +1,107 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http/httptest"
 	"reflect"
 	"slices"
+	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/tas50/cinc-zero/internal/search"
 	"github.com/tas50/cinc-zero/internal/store"
 )
+
+// cacheLen counts the live entries in the flatten cache.
+func cacheLen(c *searchCache) int {
+	n := 0
+	c.m.Range(func(_, _ any) bool { n++; return true })
+	return n
+}
+
+// TestSearchMatchAllSkipsFlatten asserts the match-all fast path: a *:* search
+// with no partial body returns every document (sorted by id) without flattening
+// any of them, so the flatten cache stays empty.
+func TestSearchMatchAllSkipsFlatten(t *testing.T) {
+	st := store.New()
+	if _, err := st.CreateOrg("acme"); err != nil {
+		t.Fatal(err)
+	}
+	a := New(st)
+	srv := httptest.NewServer(a.Handler())
+	t.Cleanup(srv.Close)
+	base := srv.URL + "/organizations/acme"
+	for _, n := range []string{"web02", "db01", "web01"} {
+		seedNode(t, base, n, "production", "x")
+	}
+
+	var res searchResult
+	_, body := do(t, "GET", base+"/search/node?q=*:*", "")
+	json.Unmarshal([]byte(body), &res)
+	if res.Total != 3 || len(res.Rows) != 3 {
+		t.Fatalf("*:* total=%d rows=%d, want 3/3: %s", res.Total, len(res.Rows), body)
+	}
+	if n := cacheLen(a.search); n != 0 {
+		t.Fatalf("match-all search flattened %d docs; the fast path must skip flatten (want 0)", n)
+	}
+	// Rows are sorted by id.
+	var prev string
+	for _, raw := range res.Rows {
+		var node struct {
+			Name string `json:"name"`
+		}
+		json.Unmarshal(raw, &node)
+		if prev != "" && node.Name <= prev {
+			t.Fatalf("rows not sorted by id: %q after %q", node.Name, prev)
+		}
+		prev = node.Name
+	}
+}
+
+// TestSearchParallelScanConsistency seeds enough nodes to exercise the parallel
+// cold-build path and asserts a filtered scan returns exactly the matching set,
+// sorted — guarding correctness when the per-doc flatten+match runs concurrently.
+func TestSearchParallelScanConsistency(t *testing.T) {
+	st := store.New()
+	if _, err := st.CreateOrg("acme"); err != nil {
+		t.Fatal(err)
+	}
+	a := New(st)
+	srv := httptest.NewServer(a.Handler())
+	t.Cleanup(srv.Close)
+	base := srv.URL + "/organizations/acme"
+
+	const n = 200
+	want := 0
+	for i := range n {
+		env := "staging"
+		if i%2 == 0 {
+			env = "production"
+			want++
+		}
+		seedNode(t, base, fmt.Sprintf("node%03d", i), env, "x")
+	}
+
+	var res searchResult
+	_, body := do(t, "GET", base+"/search/node?q=chef_environment:production&rows=1000", "")
+	json.Unmarshal([]byte(body), &res)
+	if res.Total != want || len(res.Rows) != want {
+		t.Fatalf("filtered total=%d rows=%d, want %d: %s", res.Total, len(res.Rows), want, body)
+	}
+	var prev string
+	for _, raw := range res.Rows {
+		var node struct {
+			Name string `json:"name"`
+		}
+		json.Unmarshal(raw, &node)
+		if prev != "" && node.Name <= prev {
+			t.Fatalf("rows not sorted by id: %q after %q", node.Name, prev)
+		}
+		prev = node.Name
+	}
+}
 
 // benchSearchOrg seeds n nodes with nested attributes for the search benchmarks.
 func benchSearchOrg(b *testing.B, n int) (*API, *store.Org, searchIndex, search.Query) {
@@ -101,6 +194,40 @@ func TestSearchDocRecomputesAfterContentChange(t *testing.T) {
 	if !slices.Contains(f2["foo"], "changed") || slices.Contains(f2["foo"], "bar") {
 		t.Fatalf("recomputed flatten produced %v for foo, want it to contain changed and not bar", f2["foo"])
 	}
+}
+
+// TestSearchDocConcurrentAccess hammers searchDoc from many goroutines over a
+// shared set of nodes (the search-scan access pattern) and asserts every caller
+// gets a correct flattened view. Run under -race, it guards the cache against
+// data races when its locking is changed.
+func TestSearchDocConcurrentAccess(t *testing.T) {
+	st := store.New()
+	org, _ := st.CreateOrg("acme")
+	a := New(st)
+	const nodes = 50
+	raws := make([][]byte, nodes)
+	for i := range nodes {
+		id := fmt.Sprintf("node%d", i)
+		org.Put("nodes", id, []byte(fmt.Sprintf(`{"name":%q,"normal":{"idx":%d}}`, id, i)))
+		raws[i], _ = org.View("nodes", id)
+	}
+
+	var wg sync.WaitGroup
+	for g := range 16 {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			for range 100 {
+				i := g % nodes
+				_, fields, ok := a.searchDoc("nodes", fmt.Sprintf("node%d", i), raws[i], true)
+				if !ok || !slices.Contains(fields["idx"], strconv.Itoa(i)) {
+					t.Errorf("node%d: ok=%v fields[idx]=%v", i, ok, fields["idx"])
+					return
+				}
+			}
+		}(g)
+	}
+	wg.Wait()
 }
 
 func TestSearchDocReportsNotOKForInvalidJSON(t *testing.T) {
