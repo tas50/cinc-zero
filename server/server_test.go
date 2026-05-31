@@ -32,6 +32,35 @@ func startServer(t *testing.T, opts Options) *Server {
 	return srv
 }
 
+// writeRepoFiles lays out a chef-repo under dir from a rel-path -> contents map.
+func writeRepoFiles(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+	for rel, content := range files {
+		path := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// getBody GETs url and returns the response body, failing on a non-200.
+func getBody(t *testing.T, url string) string {
+	t.Helper()
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET %s = %d: %s", url, resp.StatusCode, body)
+	}
+	return string(body)
+}
+
 // signed builds a request signed with the server's admin key.
 func signed(t *testing.T, srv *Server, method, url, body string) *http.Request {
 	t.Helper()
@@ -161,6 +190,31 @@ func TestServerLoadsRepo(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "prod") {
 		t.Fatalf("loaded node body = %s", body)
+	}
+}
+
+// TestServerLoadsPolicyRepo proves that a policy lock and policy group loaded
+// from a chef-repo are visible through the policy API — the read path keys
+// revisions by "policy_revisions:<name>", so a loader that stored them anywhere
+// else would leave `GET /policies` empty.
+func TestServerLoadsPolicyRepo(t *testing.T) {
+	dir := t.TempDir()
+	writeRepoFiles(t, dir, map[string]string{
+		"policies/appserver-1.0.0.json": `{"name":"appserver","revision_id":"1.0.0","run_list":["recipe[appserver::default]"]}`,
+		"policy_groups/prod.json":       `{"policies":{"appserver":{"revision_id":"1.0.0"}}}`,
+	})
+
+	srv := startServer(t, Options{Orgs: []string{"acme"}, DisableAuth: true, Repo: dir})
+
+	if body := getBody(t, srv.URL()+"/organizations/acme/policies"); !strings.Contains(body, "appserver") || !strings.Contains(body, "1.0.0") {
+		t.Fatalf("GET /policies = %s, want the loaded appserver/1.0.0", body)
+	}
+	if body := getBody(t, srv.URL()+"/organizations/acme/policy_groups/prod"); !strings.Contains(body, "appserver") || !strings.Contains(body, "1.0.0") {
+		t.Fatalf("GET /policy_groups/prod = %s, want the appserver pin", body)
+	}
+	// The group's pinned revision resolves to the loaded lock.
+	if body := getBody(t, srv.URL()+"/organizations/acme/policy_groups/prod/policies/appserver"); !strings.Contains(body, "appserver::default") {
+		t.Fatalf("GET pinned policy = %s, want the run_list from the loaded lock", body)
 	}
 }
 

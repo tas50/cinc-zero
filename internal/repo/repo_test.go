@@ -29,7 +29,8 @@ func TestLoad(t *testing.T) {
 		"roles/web.json":             `{"name":"web","run_list":["recipe[nginx]"]}`,
 		"environments/prod.json":     `{"name":"prod"}`,
 		"clients/builder.json":       `{"name":"builder"}`,
-		"policies/base.json":         `{"name":"base"}`,
+		"policies/base-1.0.0.json":   `{"name":"base","revision_id":"1.0.0"}`,
+		"policy_groups/prod.json":    `{"policies":{"base":{"revision_id":"1.0.0"}}}`,
 		"data_bags/users/alice.json": `{"id":"alice","admin":true}`,
 		"data_bags/users/bob.json":   `{"id":"bob"}`,
 		"data_bags/secrets/key.json": `{"id":"key"}`,
@@ -55,8 +56,13 @@ func TestLoad(t *testing.T) {
 	if _, ok := org.Get("clients", "builder"); !ok {
 		t.Fatal("client builder not loaded")
 	}
-	if _, ok := org.Get("policies", "base"); !ok {
-		t.Fatal("policy base not loaded")
+	// Policy locks load as revisions, keyed by revision_id, exactly where the
+	// policy API reads them — not into a dead "policies" collection.
+	if _, ok := org.Get("policy_revisions:base", "1.0.0"); !ok {
+		t.Fatal("policy revision base/1.0.0 not loaded")
+	}
+	if _, ok := org.Get("policy_groups", "prod"); !ok {
+		t.Fatal("policy group prod not loaded")
 	}
 	// Data bags register the bag and store items in the bag's item collection.
 	if _, ok := org.Get("data_bags", "users"); !ok {
@@ -69,8 +75,52 @@ func TestLoad(t *testing.T) {
 		t.Fatal("data bag item key not loaded")
 	}
 
-	if sum.Counts["nodes"] != 1 || sum.Counts["data_bag_items"] != 3 {
+	if sum.Counts["nodes"] != 1 || sum.Counts["data_bag_items"] != 3 || sum.Counts["policy_revisions"] != 1 {
 		t.Fatalf("summary counts = %+v", sum.Counts)
+	}
+}
+
+// TestLoadPolicyRevisions loads several policy locks, including two revisions
+// of the same policy, and confirms each lands under its policy's revision
+// collection keyed by revision_id.
+func TestLoadPolicyRevisions(t *testing.T) {
+	dir := t.TempDir()
+	writeRepo(t, dir, map[string]string{
+		"policies/appserver-1.0.0.json": `{"name":"appserver","revision_id":"1.0.0","run_list":["recipe[appserver::default]"]}`,
+		"policies/appserver-1.1.0.json": `{"name":"appserver","revision_id":"1.1.0","run_list":["recipe[appserver::default]"]}`,
+		"policies/web-2.0.0.json":       `{"name":"web","revision_id":"2.0.0"}`,
+	})
+
+	st := store.New()
+	org, _ := st.CreateOrg("acme")
+	sum, err := Load(org, dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	for _, rev := range []string{"1.0.0", "1.1.0"} {
+		if _, ok := org.Get("policy_revisions:appserver", rev); !ok {
+			t.Errorf("appserver revision %s not loaded", rev)
+		}
+	}
+	if _, ok := org.Get("policy_revisions:web", "2.0.0"); !ok {
+		t.Error("web revision 2.0.0 not loaded")
+	}
+	if sum.Counts["policy_revisions"] != 3 {
+		t.Errorf("policy_revisions count = %d, want 3", sum.Counts["policy_revisions"])
+	}
+}
+
+// TestLoadPolicyMissingRevisionID rejects a policy lock that omits the
+// revision_id the policy API keys revisions by.
+func TestLoadPolicyMissingRevisionID(t *testing.T) {
+	dir := t.TempDir()
+	writeRepo(t, dir, map[string]string{"policies/broken.json": `{"name":"broken"}`})
+
+	st := store.New()
+	org, _ := st.CreateOrg("acme")
+	if _, err := Load(org, dir); err == nil {
+		t.Fatal("expected an error for a policy lock without revision_id")
 	}
 }
 
