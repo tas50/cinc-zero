@@ -1,8 +1,10 @@
 // Package repo loads an on-disk chef-repo into an organization's store,
-// mirroring the directory shapes that `knife upload` expects. JSON object types
-// (nodes, roles, environments, clients, policies, policy_groups) and data bags
-// are supported. Loading cookbook directories — which requires synthesizing a
-// manifest and checksumming files — is a separate, future increment.
+// mirroring the directory shapes that `knife upload` expects: nodes, roles,
+// environments, and clients load as name-keyed JSON objects; data bags register
+// each bag and its items; cookbook directories are checksummed into the blob
+// store; policy locks under policies/ load as revisions keyed by their
+// revision_id (where the policy API reads them); and policy_groups/ pin
+// policies to groups.
 package repo
 
 import (
@@ -28,6 +30,8 @@ const (
 
 func dataBagItemsColl(bag string) string { return "databag_items:" + bag }
 
+func policyRevColl(policy string) string { return "policy_revisions:" + policy }
+
 // objectDir maps a chef-repo directory to its store collection and the field
 // that names each object.
 type objectDir struct {
@@ -39,7 +43,9 @@ var objectDirs = []objectDir{
 	{"roles", "roles", "name"},
 	{"environments", "environments", "name"},
 	{"clients", "clients", "name"},
-	{"policies", "policies", "name"},
+	// Policies are not a plain name-keyed collection: each file is a policy
+	// lock loaded by loadPolicies into "policy_revisions:<name>". Policy groups,
+	// however, are name-keyed JSON the policy-group API reads directly.
 	{"policy_groups", "policy_groups", "name"},
 }
 
@@ -56,6 +62,14 @@ func Load(org *store.Org, root string) (*Summary, error) {
 		if n > 0 {
 			sum.Counts[od.collection] += n
 		}
+	}
+
+	revisions, err := loadPolicies(org, filepath.Join(root, "policies"))
+	if err != nil {
+		return nil, err
+	}
+	if revisions > 0 {
+		sum.Counts["policy_revisions"] = revisions
 	}
 
 	bags, items, err := loadDataBags(org, filepath.Join(root, dataBagsColl))
@@ -91,6 +105,33 @@ func loadObjects(org *store.Org, dir, collection, nameField string) (int, error)
 			return 0, err
 		}
 		org.Put(collection, objectKey(obj, nameField, path), raw)
+		count++
+	}
+	return count, nil
+}
+
+// loadPolicies stores each policy lock in dir under "policy_revisions:<name>"
+// keyed by its revision_id — the same place the policy API persists and reads
+// revisions. A chef-repo names these files "<name>-<revision_id>.json", but the
+// lock's own "name" and "revision_id" fields are authoritative; both are
+// required.
+func loadPolicies(org *store.Org, dir string) (int, error) {
+	entries, err := jsonFiles(dir)
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, path := range entries {
+		obj, raw, err := readObject(path)
+		if err != nil {
+			return 0, err
+		}
+		name, _ := obj["name"].(string)
+		rev, _ := obj["revision_id"].(string)
+		if name == "" || rev == "" {
+			return 0, fmt.Errorf(`%s: policy lock needs both "name" and "revision_id"`, path)
+		}
+		org.Put(policyRevColl(name), rev, raw)
 		count++
 	}
 	return count, nil

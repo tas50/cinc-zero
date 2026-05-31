@@ -62,8 +62,11 @@ go build -o cinc-zero ./cmd/cinc-zero
 Pass `--repo ./chef-repo` to preload an on-disk chef-repo (its `nodes/`,
 `roles/`, `environments/`, `clients/`, `policies/`, `policy_groups/`,
 `data_bags/`, and `cookbooks/`) into the first org at startup, mirroring
-`knife upload`. Cookbook directories are checksummed into the blob store and
-served with a synthesized manifest.
+`knife upload`. Files under `policies/` are Policyfile locks (named
+`<name>-<revision>.json`); each loads as a policy revision keyed by its
+`revision_id`, and `policy_groups/<group>.json` pins policies to a group.
+Cookbook directories are checksummed into the blob store and served with a
+synthesized manifest.
 
 ## Docker
 
