@@ -92,7 +92,7 @@ func (a *API) getObject(segment string) http.HandlerFunc {
 			return
 		}
 		name := r.PathValue("name")
-		raw, ok := org.Get(segment, name)
+		raw, ok := org.View(segment, name)
 		if !ok {
 			writeError(w, http.StatusNotFound, "Cannot find "+segment+" "+name)
 			return
@@ -140,7 +140,7 @@ func (a *API) headObject(segment string) http.HandlerFunc {
 		if org == nil {
 			return
 		}
-		if _, ok := org.Get(segment, r.PathValue("name")); !ok {
+		if _, ok := org.View(segment, r.PathValue("name")); !ok {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}

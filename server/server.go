@@ -10,7 +10,6 @@ package server
 
 import (
 	"context"
-	"crypto/rsa"
 	"errors"
 	"fmt"
 	"net"
@@ -80,6 +79,7 @@ type Server struct {
 	listener      net.Listener
 	adminKey      []byte            // PEM-encoded admin private key
 	validatorKeys map[string][]byte // org name -> PEM-encoded validator private key
+	keyCache      *auth.PublicKeyCache
 	url           string
 }
 
@@ -130,6 +130,7 @@ func New(opts Options) (*Server, error) {
 		store:         st,
 		adminKey:      auth.EncodePrivateKeyPEM(key),
 		validatorKeys: validatorKeys,
+		keyCache:      auth.NewPublicKeyCache(),
 	}
 	handler := api.New(st, api.WithACLEnforcement(opts.EnforceACL)).Handler()
 	if !opts.DisableAuth {
@@ -182,19 +183,3 @@ func (s *Server) ValidatorKey(org string) []byte { return s.validatorKeys[org] }
 
 // Store exposes the underlying store for programmatic seeding and inspection.
 func (s *Server) Store() *store.Store { return s.store }
-
-// publicKeyFor resolves an actor's RSA public key, checking org clients (when
-// the request targets an org) and then global users.
-func (s *Server) publicKeyFor(path, actor string) (*rsa.PublicKey, bool) {
-	if org := orgFromPath(path); org != "" {
-		if o, ok := s.store.Org(org); ok {
-			if pub, ok := actorKey(o, "clients", actor); ok {
-				return pub, true
-			}
-		}
-	}
-	if pub, ok := actorKey(s.store.Global(), "users", actor); ok {
-		return pub, true
-	}
-	return nil, false
-}

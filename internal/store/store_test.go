@@ -107,6 +107,37 @@ func TestStoredValueIsCopied(t *testing.T) {
 	}
 }
 
+func TestViewReturnsStoredValue(t *testing.T) {
+	s := New()
+	org, _ := s.CreateOrg("acme")
+	org.Put("nodes", "web", []byte(`{"name":"web"}`))
+	got, ok := org.View("nodes", "web")
+	if !ok || string(got) != `{"name":"web"}` {
+		t.Fatalf("View returned %q ok=%v", got, ok)
+	}
+	if _, ok := org.View("nodes", "missing"); ok {
+		t.Fatal("View of missing key should report false")
+	}
+}
+
+// TestViewReturnsReferenceNotCopy documents View's contract: it returns the
+// stored backing slice directly (no defensive copy), unlike Get. Callers must
+// treat the result as read-only.
+func TestViewReturnsReferenceNotCopy(t *testing.T) {
+	s := New()
+	org, _ := s.CreateOrg("acme")
+	org.Put("nodes", "web", []byte(`{"name":"web"}`))
+	a, _ := org.View("nodes", "web")
+	b, _ := org.View("nodes", "web")
+	if &a[0] != &b[0] {
+		t.Fatal("View should return the backing slice without copying")
+	}
+	c, _ := org.Get("nodes", "web")
+	if &a[0] == &c[0] {
+		t.Fatal("Get should return a defensive copy distinct from View")
+	}
+}
+
 func TestCollectionsListsNonEmptyOnly(t *testing.T) {
 	s := New()
 	org, _ := s.CreateOrg("acme")

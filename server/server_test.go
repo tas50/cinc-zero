@@ -3,7 +3,9 @@ package server
 import (
 	"context"
 	"crypto/md5"
+	"crypto/rsa"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -14,6 +16,46 @@ import (
 
 	"github.com/tas50/cinc-zero/internal/auth"
 )
+
+// putUser writes a global user with the given public key directly into the
+// store and returns the matching PEM-encoded private key for signing.
+func putUser(t *testing.T, srv *Server, name string, key *rsa.PrivateKey) []byte {
+	t.Helper()
+	pubPEM, err := auth.EncodePublicKeyPEM(&key.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := fmt.Sprintf(`{"username":%q,"public_key":%q}`, name, string(pubPEM))
+	srv.Store().Global().Put("users", name, []byte(doc))
+	return auth.EncodePrivateKeyPEM(key)
+}
+
+// TestKeyRotationReauthenticates verifies that rotating an actor's public key
+// takes effect immediately: requests signed with the old key are rejected and
+// the new key is accepted. This guards the public-key cache against serving a
+// stale key after rotation.
+func TestKeyRotationReauthenticates(t *testing.T) {
+	srv := startServer(t, Options{})
+	url := srv.URL() + "/organizations/acme/nodes"
+
+	keyA, _ := auth.GenerateKey()
+	pemA := putUser(t, srv, "alice", keyA)
+
+	if code := statusOf(t, signedAs(t, "alice", pemA, "GET", url, "")); code != http.StatusOK {
+		t.Fatalf("initial auth with key A = %d, want 200", code)
+	}
+
+	// Rotate alice's key to B.
+	keyB, _ := auth.GenerateKey()
+	pemB := putUser(t, srv, "alice", keyB)
+
+	if code := statusOf(t, signedAs(t, "alice", pemA, "GET", url, "")); code != http.StatusUnauthorized {
+		t.Fatalf("auth with stale key A after rotation = %d, want 401", code)
+	}
+	if code := statusOf(t, signedAs(t, "alice", pemB, "GET", url, "")); code != http.StatusOK {
+		t.Fatalf("auth with rotated key B = %d, want 200", code)
+	}
+}
 
 func startServer(t *testing.T, opts Options) *Server {
 	t.Helper()

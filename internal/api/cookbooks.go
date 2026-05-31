@@ -116,7 +116,7 @@ func (a *API) getFile(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	data, ok := org.Blob(r.PathValue("checksum"))
+	data, ok := org.BlobView(r.PathValue("checksum"))
 	if !ok {
 		writeError(w, http.StatusNotFound, "File not found")
 		return
