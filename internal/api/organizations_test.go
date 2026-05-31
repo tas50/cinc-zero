@@ -111,3 +111,49 @@ func TestCreateOrganizationHelper(t *testing.T) {
 		t.Fatal("expected conflict on duplicate org")
 	}
 }
+
+// TestCreateOrganizationWithKeyUsesProvidedKey verifies the injected-key variant
+// provisions the org with the caller's key rather than generating a fresh one —
+// the contract that lets the server bootstrap generate keys in parallel and then
+// seed serially.
+func TestCreateOrganizationWithKeyUsesProvidedKey(t *testing.T) {
+	st := store.New()
+	key, err := auth.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	priv, err := CreateOrganizationWithKey(st, "gamma", "Gamma Org", key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(priv) != string(auth.EncodePrivateKeyPEM(key)) {
+		t.Fatal("returned private key does not match the provided key")
+	}
+
+	org, ok := st.Org("gamma")
+	if !ok {
+		t.Fatal("org not created")
+	}
+	raw, ok := org.Get("clients", "gamma-validator")
+	if !ok {
+		t.Fatal("validator client not created")
+	}
+	var client struct {
+		PublicKey string `json:"public_key"`
+		Validator bool   `json:"validator"`
+	}
+	if err := json.Unmarshal(raw, &client); err != nil {
+		t.Fatal(err)
+	}
+	wantPub, err := auth.EncodePublicKeyPEM(&key.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.PublicKey != string(wantPub) {
+		t.Fatal("validator public key does not match the provided key")
+	}
+	if !client.Validator {
+		t.Fatal("validator client not marked as validator")
+	}
+}

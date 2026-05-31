@@ -9,11 +9,15 @@
 package server
 
 import (
+	"bufio"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/tas50/cinc-zero/internal/api"
@@ -93,12 +97,17 @@ func New(opts Options) (*Server, error) {
 	}
 	st := store.New()
 
-	// Bootstrap the admin user with a fresh key pair.
-	key, err := auth.GenerateKey()
+	// RSA-2048 key generation is the dominant startup cost and each key is
+	// independent, so generate the admin key and every org's validator key in
+	// parallel, then seed the store serially with the results. keys[0] is the
+	// admin key; keys[i+1] is the validator key for opts.Orgs[i].
+	keys, err := generateKeys(len(opts.Orgs) + 1)
 	if err != nil {
-		return nil, fmt.Errorf("generate admin key: %w", err)
+		return nil, err
 	}
-	pubPEM, err := auth.EncodePublicKeyPEM(&key.PublicKey)
+
+	// Bootstrap the admin user.
+	pubPEM, err := auth.EncodePublicKeyPEM(&keys[0].PublicKey)
 	if err != nil {
 		return nil, err
 	}
@@ -106,8 +115,8 @@ func New(opts Options) (*Server, error) {
 	st.Global().Put("users", opts.AdminName, []byte(adminDoc))
 
 	validatorKeys := make(map[string][]byte, len(opts.Orgs))
-	for _, name := range opts.Orgs {
-		validator, err := api.CreateOrganization(st, name, name)
+	for i, name := range opts.Orgs {
+		validator, err := api.CreateOrganizationWithKey(st, name, name, keys[i+1])
 		if err != nil {
 			return nil, fmt.Errorf("create org %q: %w", name, err)
 		}
@@ -128,7 +137,7 @@ func New(opts Options) (*Server, error) {
 	s := &Server{
 		opts:          opts,
 		store:         st,
-		adminKey:      auth.EncodePrivateKeyPEM(key),
+		adminKey:      auth.EncodePrivateKeyPEM(keys[0]),
 		validatorKeys: validatorKeys,
 		keyCache:      auth.NewPublicKeyCache(),
 	}
@@ -138,6 +147,31 @@ func New(opts Options) (*Server, error) {
 	}
 	s.handler = handler
 	return s, nil
+}
+
+// generateKeys generates n RSA key pairs concurrently and returns them in order.
+// Key generation is CPU-bound and independent, so running it in parallel cuts
+// startup well below the serial (n × keygen) cost. Each goroutine reads entropy
+// through its own buffered reader so they do not serialize on crypto/rand's
+// global lock during prime search.
+func generateKeys(n int) ([]*rsa.PrivateKey, error) {
+	keys := make([]*rsa.PrivateKey, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := range keys {
+		go func(i int) {
+			defer wg.Done()
+			keys[i], errs[i] = auth.GenerateKeyFrom(bufio.NewReaderSize(rand.Reader, 1<<16))
+		}(i)
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			return nil, fmt.Errorf("generate key: %w", err)
+		}
+	}
+	return keys, nil
 }
 
 // Start binds the listener and serves in a background goroutine.

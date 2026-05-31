@@ -1,10 +1,29 @@
 package auth
 
 import (
+	"bufio"
+	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
 	"testing"
 )
+
+// TestGenerateKeyFromProducesValidKey verifies GenerateKeyFrom reads entropy
+// from the supplied reader and yields a usable 2048-bit key — the seam that lets
+// the bootstrap give each parallel keygen its own buffered entropy source to
+// avoid contending on the global crypto/rand reader.
+func TestGenerateKeyFromProducesValidKey(t *testing.T) {
+	key, err := GenerateKeyFrom(bufio.NewReader(rand.Reader))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key.N.BitLen() != 2048 {
+		t.Fatalf("key size = %d bits, want 2048", key.N.BitLen())
+	}
+	if err := key.Validate(); err != nil {
+		t.Fatalf("generated key invalid: %v", err)
+	}
+}
 
 func TestPrivateKeyPEMRoundTrip(t *testing.T) {
 	key, err := GenerateKey()

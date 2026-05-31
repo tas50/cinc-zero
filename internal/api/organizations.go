@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/rand"
+	"crypto/rsa"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -24,12 +25,25 @@ func (a *API) registerOrganizationRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /organizations/{org}", a.deleteOrganization)
 }
 
-// CreateOrganization provisions a new organization: it creates the org in the
-// store, seeds the _default environment, registers org metadata, and creates
-// the "<name>-validator" client. It returns the validator's PEM-encoded private
-// key, which Chef returns exactly once at creation time. This helper is shared
-// by the POST handler and the server bootstrap.
+// CreateOrganization provisions a new organization with a freshly generated
+// validator key. See CreateOrganizationWithKey; this is the convenience form
+// used by the POST handler, where one key is generated on demand.
 func CreateOrganization(st *store.Store, name, fullName string) ([]byte, error) {
+	key, err := auth.GenerateKey()
+	if err != nil {
+		return nil, err
+	}
+	return CreateOrganizationWithKey(st, name, fullName, key)
+}
+
+// CreateOrganizationWithKey provisions a new organization using the provided
+// validator key: it creates the org in the store, seeds the _default
+// environment, registers org metadata, and creates the "<name>-validator"
+// client. It returns the validator's PEM-encoded private key, which Chef returns
+// exactly once at creation time. Taking the key as a parameter lets the server
+// bootstrap generate all of its keys in parallel (the slow part) and then seed
+// the store serially. This helper is shared by the POST handler and bootstrap.
+func CreateOrganizationWithKey(st *store.Store, name, fullName string, key *rsa.PrivateKey) ([]byte, error) {
 	org, err := st.CreateOrg(name)
 	if err != nil {
 		return nil, err
@@ -43,10 +57,6 @@ func CreateOrganization(st *store.Store, name, fullName string) ([]byte, error) 
 	meta := map[string]any{"name": name, "full_name": fullName, "guid": guid}
 	st.Global().Put(orgsColl, name, mustEncode(meta))
 
-	key, err := auth.GenerateKey()
-	if err != nil {
-		return nil, err
-	}
 	pubPEM, err := auth.EncodePublicKeyPEM(&key.PublicKey)
 	if err != nil {
 		return nil, err
