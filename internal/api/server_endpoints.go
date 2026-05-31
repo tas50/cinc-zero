@@ -19,6 +19,7 @@ const (
 
 func (a *API) registerServerEndpoints(mux *http.ServeMux) {
 	mux.HandleFunc("GET /_stats", a.stats)
+	mux.HandleFunc("GET /license", a.license)
 	mux.HandleFunc("GET /server_api_version", a.serverAPIVersion)
 	mux.HandleFunc("GET /organizations/{org}/required_recipe", a.requiredRecipe)
 	mux.HandleFunc("GET /organizations/{org}/principals/{name}", a.principal)
@@ -43,6 +44,19 @@ func (a *API) serverAPIVersion(w http.ResponseWriter, r *http.Request) {
 // (but well-formed) stats array.
 func (a *API) stats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, []any{})
+}
+
+// license reports the server license state. A stock Chef Infra Server exposes
+// this endpoint so clients can surface node-limit warnings; cinc-zero is an
+// unlimited in-memory test server, so it always reports a valid, non-exceeded
+// license with no nodes counted against it.
+func (a *API) license(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"limit_exceeded": false,
+		"node_license":   25,
+		"node_count":     0,
+		"upgrade_url":    "https://www.chef.io/contact-us/",
+	})
 }
 
 // requiredRecipe mirrors a stock server where the feature is disabled.

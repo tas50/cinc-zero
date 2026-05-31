@@ -21,6 +21,31 @@ func TestStatsEndpoint(t *testing.T) {
 	}
 }
 
+func TestLicenseEndpoint(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	resp, body := do(t, "GET", srv.URL+"/license", "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("/license = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("/license Content-Type = %q, want application/json", ct)
+	}
+	var lic struct {
+		LimitExceeded *bool `json:"limit_exceeded"`
+		NodeLicense   *int  `json:"node_license"`
+		NodeCount     *int  `json:"node_count"`
+	}
+	if err := json.Unmarshal([]byte(body), &lic); err != nil {
+		t.Fatalf("/license body not JSON: %v (%s)", err, body)
+	}
+	if lic.LimitExceeded == nil || lic.NodeLicense == nil || lic.NodeCount == nil {
+		t.Fatalf("/license missing required fields: %s", body)
+	}
+	if *lic.LimitExceeded {
+		t.Errorf("/license limit_exceeded = true, want false")
+	}
+}
+
 func TestRequiredRecipeDisabled(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	// Disabled by default, like a stock Chef server.
