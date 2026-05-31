@@ -138,6 +138,50 @@ func TestViewReturnsReferenceNotCopy(t *testing.T) {
 	}
 }
 
+func TestRangeVisitsAllEntriesCopyFree(t *testing.T) {
+	s := New()
+	org, _ := s.CreateOrg("acme")
+	org.Put("nodes", "a", []byte(`{"n":"a"}`))
+	org.Put("nodes", "b", []byte(`{"n":"b"}`))
+
+	seen := map[string]string{}
+	org.Range("nodes", func(key string, raw []byte) bool {
+		seen[key] = string(raw)
+		// raw must be the backing slice, not a copy.
+		ref, _ := org.View("nodes", key)
+		if &raw[0] != &ref[0] {
+			t.Errorf("Range copied value for %q", key)
+		}
+		return true
+	})
+	if len(seen) != 2 || seen["a"] != `{"n":"a"}` || seen["b"] != `{"n":"b"}` {
+		t.Fatalf("Range did not visit all entries: %v", seen)
+	}
+
+	// An empty collection yields no calls.
+	calls := 0
+	org.Range("missing", func(string, []byte) bool { calls++; return true })
+	if calls != 0 {
+		t.Fatalf("Range over empty collection called fn %d times", calls)
+	}
+}
+
+func TestRangeStopsWhenFnReturnsFalse(t *testing.T) {
+	s := New()
+	org, _ := s.CreateOrg("acme")
+	for _, k := range []string{"a", "b", "c"} {
+		org.Put("nodes", k, []byte(`{}`))
+	}
+	count := 0
+	org.Range("nodes", func(string, []byte) bool {
+		count++
+		return false // stop after the first
+	})
+	if count != 1 {
+		t.Fatalf("Range visited %d entries, want 1 (early stop)", count)
+	}
+}
+
 func TestCollectionsListsNonEmptyOnly(t *testing.T) {
 	s := New()
 	org, _ := s.CreateOrg("acme")

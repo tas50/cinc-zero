@@ -147,11 +147,7 @@ func (a *API) envNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := map[string]string{}
-	for _, name := range org.Keys("nodes") {
-		raw, ok := org.Get("nodes", name)
-		if !ok {
-			continue
-		}
+	org.Range("nodes", func(name string, raw []byte) bool {
 		var node struct {
 			ChefEnvironment string `json:"chef_environment"`
 		}
@@ -163,7 +159,8 @@ func (a *API) envNodes(w http.ResponseWriter, r *http.Request) {
 		if nodeEnv == env {
 			out[name] = objectURL(r, org.Name(), "nodes", name)
 		}
-	}
+		return true
+	})
 	writeJSON(w, http.StatusOK, out)
 }
 

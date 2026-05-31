@@ -61,6 +61,35 @@ func TestSearchNodes(t *testing.T) {
 	}
 }
 
+// TestSearchReflectsUpdatesEndToEnd guards the flatten cache: a re-indexed node
+// must be found by its new attribute value and no longer by its old one.
+func TestSearchReflectsUpdatesEndToEnd(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	seedNode(t, base, "web01", "production", "alpha")
+
+	var res searchResult
+	_, body := do(t, "GET", base+"/search/node?q=foo_bar:alpha", "")
+	json.Unmarshal([]byte(body), &res)
+	if res.Total != 1 {
+		t.Fatalf("before update foo_bar:alpha total = %d, want 1: %s", res.Total, body)
+	}
+
+	// Re-index the node with a new attribute value.
+	seedNode(t, base, "web01", "production", "omega")
+
+	_, body = do(t, "GET", base+"/search/node?q=foo_bar:alpha", "")
+	json.Unmarshal([]byte(body), &res)
+	if res.Total != 0 {
+		t.Fatalf("after update foo_bar:alpha total = %d, want 0 (stale cache): %s", res.Total, body)
+	}
+	_, body = do(t, "GET", base+"/search/node?q=foo_bar:omega", "")
+	json.Unmarshal([]byte(body), &res)
+	if res.Total != 1 {
+		t.Fatalf("after update foo_bar:omega total = %d, want 1: %s", res.Total, body)
+	}
+}
+
 func TestSearchPagination(t *testing.T) {
 	srv, _ := newTestAPI(t)
 	base := srv.URL + "/organizations/acme"

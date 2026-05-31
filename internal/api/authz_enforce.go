@@ -328,17 +328,13 @@ type Actor struct {
 func actorGroups(org *store.Org, actor Actor) map[string]bool {
 	type rec struct{ users, clients, groups []string }
 	all := map[string]rec{}
-	for _, name := range org.Keys("groups") {
-		raw, ok := org.Get("groups", name)
-		if !ok {
-			continue
-		}
+	org.Range("groups", func(name string, raw []byte) bool {
 		var g map[string]any
-		if json.Unmarshal(raw, &g) != nil {
-			continue
+		if json.Unmarshal(raw, &g) == nil {
+			all[name] = rec{anyStrings(g["users"]), anyStrings(g["clients"]), anyStrings(g["groups"])}
 		}
-		all[name] = rec{anyStrings(g["users"]), anyStrings(g["clients"]), anyStrings(g["groups"])}
-	}
+		return true
+	})
 
 	member := map[string]bool{}
 	var queue []string

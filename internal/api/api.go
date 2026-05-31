@@ -17,6 +17,9 @@ type API struct {
 	// checked against object ACLs and group membership before reaching a
 	// handler. When clear (the default) every authenticated actor is permitted.
 	enforceACL bool
+	// search memoizes the flattened searchable view of each document so repeated
+	// queries skip re-unmarshalling and re-flattening unchanged objects.
+	search *searchCache
 }
 
 // Option configures an API at construction time.
@@ -29,7 +32,7 @@ func WithACLEnforcement(enabled bool) Option {
 
 // New returns an API backed by st, applying any options.
 func New(st *store.Store, opts ...Option) *API {
-	a := &API{store: st}
+	a := &API{store: st, search: newSearchCache()}
 	for _, opt := range opts {
 		opt(a)
 	}

@@ -255,15 +255,29 @@ func (a *API) listCookbooks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, collectionListBody(r, org, "cookbooks", "version", cookbookVersions(org)))
 }
 
+// cookbookVersionsFor returns one cookbook's versions (sorted newest first)
+// without building — and sorting — the version map for every other cookbook the
+// way cookbookVersions does. Returns nil if the cookbook has no versions.
+func cookbookVersionsFor(org *store.Org, name string) []string {
+	var vers []string
+	org.Range("cookbooks", func(key string, _ []byte) bool {
+		if cb, version, ok := strings.Cut(key, "/"); ok && cb == name {
+			vers = append(vers, version)
+		}
+		return true
+	})
+	sort.Slice(vers, func(i, j int) bool { return compareVersions(vers[i], vers[j]) > 0 })
+	return vers
+}
+
 func (a *API) getCookbook(w http.ResponseWriter, r *http.Request) {
 	org := a.org(w, r)
 	if org == nil {
 		return
 	}
 	name := r.PathValue("name")
-	all := cookbookVersions(org)
-	vers, ok := all[name]
-	if !ok {
+	vers := cookbookVersionsFor(org, name)
+	if len(vers) == 0 {
 		writeError(w, http.StatusNotFound, "Cannot find a cookbook named "+name)
 		return
 	}
