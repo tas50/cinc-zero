@@ -2,8 +2,10 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 // Assorted server endpoints: /_stats, per-org required_recipe and principals,
@@ -17,8 +19,23 @@ const (
 
 func (a *API) registerServerEndpoints(mux *http.ServeMux) {
 	mux.HandleFunc("GET /_stats", a.stats)
+	mux.HandleFunc("GET /server_api_version", a.serverAPIVersion)
 	mux.HandleFunc("GET /organizations/{org}/required_recipe", a.requiredRecipe)
 	mux.HandleFunc("GET /organizations/{org}/principals/{name}", a.principal)
+}
+
+// serverAPIVersion reports the supported server API version range and the
+// version negotiated for this request. The request has already passed version
+// validation in withAPIVersion, so the header here is either absent (default to
+// the minimum) or a supported integer.
+func (a *API) serverAPIVersion(w http.ResponseWriter, r *http.Request) {
+	requested, _ := parseAPIVersion(r.Header.Get("X-Ops-Server-API-Version"))
+	writeJSON(w, http.StatusOK, map[string]int{
+		"min_version":      apiVersionMin,
+		"max_version":      apiVersionMax,
+		"request_version":  requested,
+		"response_version": requested,
+	})
 }
 
 // stats is a stub: a stock Chef server exposes erchef/Prometheus metrics here,
@@ -66,32 +83,57 @@ func principalDoc(name, typ string, actorRaw []byte) map[string]any {
 	}
 }
 
-// withAPIVersion advertises the supported server API version range on every
-// response (X-Ops-Server-API-Version) and rejects requests asking for a version
-// outside that range with 406, as Chef clients expect for version negotiation.
+// withAPIVersion negotiates the server API version on every request. It runs
+// ahead of routing so version validation precedes method and content checks, as
+// Chef's documented precedence requires. It advertises the supported range in
+// the X-Ops-Server-API-Version response header, rejects a non-numeric requested
+// version with 400, and a numeric version outside the supported range with 406.
 func withAPIVersion(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requested := apiVersionMin
-		if v := r.Header.Get("X-Ops-Server-API-Version"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil {
-				requested = n
-			}
+		header := r.Header.Get("X-Ops-Server-API-Version")
+		requested, ok := parseAPIVersion(header)
+		if !ok {
+			setVersionHeader(w, apiVersionMin, apiVersionMin)
+			writeError(w, http.StatusBadRequest,
+				"Invalid X-Ops-Server-API-Version header value "+strconv.Quote(strings.TrimSpace(header))+"; expected an integer.")
+			return
 		}
 		response := min(max(requested, apiVersionMin), apiVersionMax)
-
-		negotiation, _ := json.Marshal(map[string]string{
-			"min_version":      strconv.Itoa(apiVersionMin),
-			"max_version":      strconv.Itoa(apiVersionMax),
-			"request_version":  strconv.Itoa(requested),
-			"response_version": strconv.Itoa(response),
-		})
-		w.Header().Set("X-Ops-Server-API-Version", string(negotiation))
+		setVersionHeader(w, requested, response)
 
 		if requested < apiVersionMin || requested > apiVersionMax {
 			writeError(w, http.StatusNotAcceptable,
-				"Specified version not supported by this server.")
+				fmt.Sprintf("Unsupported server API version %d; this server supports versions %d through %d.",
+					requested, apiVersionMin, apiVersionMax))
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// parseAPIVersion reads the requested API version from the header value. An
+// absent (empty) header defaults to the minimum supported version. A present
+// but non-integer value reports ok=false so the caller can reject it with 400.
+func parseAPIVersion(header string) (version int, ok bool) {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return apiVersionMin, true
+	}
+	n, err := strconv.Atoi(header)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// setVersionHeader writes the X-Ops-Server-API-Version negotiation document.
+// Chef encodes the values as JSON strings, which clients parse back to ints.
+func setVersionHeader(w http.ResponseWriter, requested, response int) {
+	negotiation, _ := json.Marshal(map[string]string{
+		"min_version":      strconv.Itoa(apiVersionMin),
+		"max_version":      strconv.Itoa(apiVersionMax),
+		"request_version":  strconv.Itoa(requested),
+		"response_version": strconv.Itoa(response),
+	})
+	w.Header().Set("X-Ops-Server-API-Version", string(negotiation))
 }

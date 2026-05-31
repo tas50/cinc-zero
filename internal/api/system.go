@@ -14,5 +14,6 @@ func (a *API) registerSystemRoutes(mux *http.ServeMux) {
 
 // SystemPaths are request paths served without authentication.
 var SystemPaths = map[string]bool{
-	"/_status": true,
+	"/_status":            true,
+	"/server_api_version": true,
 }
