@@ -144,3 +144,88 @@ func TestSearchBadQuery400(t *testing.T) {
 		t.Fatalf("bad query = %d, want 400", resp.StatusCode)
 	}
 }
+
+func TestPartialSearchEmptyAndMissingPaths(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	// A node with an automatic attribute (ipaddress) and a nested normal one.
+	do(t, "PUT", base+"/nodes/web01",
+		`{"name":"web01","chef_environment":"production","automatic":{"ipaddress":"10.0.0.5"},"normal":{"foo":{"bar":"alpha"}}}`)
+
+	_, body := do(t, "POST", base+"/search/node?q=name:web01",
+		`{"name":["name"],"ip":["ipaddress"],"missing":["does","not","exist"],"whole":[]}`)
+	var res struct {
+		Total int `json:"total"`
+		Rows  []struct {
+			Data map[string]any `json:"data"`
+		} `json:"rows"`
+	}
+	json.Unmarshal([]byte(body), &res)
+	if res.Total != 1 || len(res.Rows) != 1 {
+		t.Fatalf("partial total = %d: %s", res.Total, body)
+	}
+	d := res.Rows[0].Data
+	// Top-level field and a merged automatic attribute resolve (node precedence).
+	if d["name"] != "web01" || d["ip"] != "10.0.0.5" {
+		t.Fatalf("resolved fields = %+v", d)
+	}
+	// A non-resolving path yields no value, not an error.
+	if d["missing"] != nil {
+		t.Fatalf("missing path should be null, got %v", d["missing"])
+	}
+	// An empty projection yields no value for that key — NOT the whole document.
+	if d["whole"] != nil {
+		t.Fatalf("empty projection should yield no value, got %v", d["whole"])
+	}
+}
+
+func TestPartialSearchNonNodeNestedPath(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	// Roles carry attributes under default_attributes (no node-style merge).
+	do(t, "POST", base+"/roles",
+		`{"name":"web","default_attributes":{"top":{"middle":{"bottom":"deep"}}}}`)
+
+	_, body := do(t, "POST", base+"/search/role?q=name:web",
+		`{"nested":["default_attributes","top","middle","bottom"],"empty":[]}`)
+	var res struct {
+		Rows []struct {
+			URL  string         `json:"url"`
+			Data map[string]any `json:"data"`
+		} `json:"rows"`
+	}
+	json.Unmarshal([]byte(body), &res)
+	if len(res.Rows) != 1 {
+		t.Fatalf("expected 1 role row: %s", body)
+	}
+	d := res.Rows[0].Data
+	if d["nested"] != "deep" {
+		t.Fatalf("nested path = %v, want deep", d["nested"])
+	}
+	if d["empty"] != nil {
+		t.Fatalf("empty projection should yield no value, got %v", d["empty"])
+	}
+	if !strings.HasSuffix(res.Rows[0].URL, "/roles/web") {
+		t.Fatalf("role row url = %s", res.Rows[0].URL)
+	}
+}
+
+func TestPartialSearchEmptyPostBodyIsFullSearch(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	seedNode(t, base, "web01", "production", "alpha")
+	// A POST with no body is a plain search (not a 400), returning whole docs.
+	resp, body := do(t, "POST", base+"/search/node?q=name:web01", "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("empty-body POST search = %d: %s", resp.StatusCode, body)
+	}
+	var res searchResult
+	json.Unmarshal([]byte(body), &res)
+	if res.Total != 1 || len(res.Rows) != 1 {
+		t.Fatalf("empty-body POST total = %d: %s", res.Total, body)
+	}
+	// Whole-object row (not a {url,data} projection).
+	if !strings.Contains(string(res.Rows[0]), `"web01"`) || strings.Contains(string(res.Rows[0]), `"data"`) {
+		t.Fatalf("expected whole-object row, got %s", res.Rows[0])
+	}
+}
