@@ -86,15 +86,16 @@ func principalDoc(name, typ string, actorRaw []byte) map[string]any {
 // withAPIVersion negotiates the server API version on every request. It runs
 // ahead of routing so version validation precedes method and content checks, as
 // Chef's documented precedence requires. It advertises the supported range in
-// the X-Ops-Server-API-Version response header, rejects a non-numeric requested
-// version with 400, and a numeric version outside the supported range with 406.
+// the X-Ops-Server-API-Version response header and rejects any unacceptable
+// requested version — non-numeric, or numeric but outside the supported range —
+// with 406 Not Acceptable, matching Chef Infra Server's version negotiation.
 func withAPIVersion(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		header := r.Header.Get("X-Ops-Server-API-Version")
 		requested, ok := parseAPIVersion(header)
 		if !ok {
 			setVersionHeader(w, apiVersionMin, apiVersionMin)
-			writeError(w, http.StatusBadRequest,
+			writeError(w, http.StatusNotAcceptable,
 				"Invalid X-Ops-Server-API-Version header value "+strconv.Quote(strings.TrimSpace(header))+"; expected an integer.")
 			return
 		}
@@ -113,7 +114,7 @@ func withAPIVersion(next http.Handler) http.Handler {
 
 // parseAPIVersion reads the requested API version from the header value. An
 // absent (empty) header defaults to the minimum supported version. A present
-// but non-integer value reports ok=false so the caller can reject it with 400.
+// but non-integer value reports ok=false so the caller can reject it with 406.
 func parseAPIVersion(header string) (version int, ok bool) {
 	header = strings.TrimSpace(header)
 	if header == "" {
