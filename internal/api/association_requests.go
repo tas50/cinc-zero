@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 
 	"github.com/tas50/cinc-zero/internal/store"
 )
@@ -89,7 +90,7 @@ func (a *API) rescindInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	raw, ok := org.Delete(assocReqColl, r.PathValue("id"))
 	if !ok {
-		writeError(w, http.StatusNotFound, "Cannot find association request "+r.PathValue("id"))
+		writeError(w, http.StatusNotFound, "Cannot find association request: "+r.PathValue("id"))
 		return
 	}
 	writeRaw(w, http.StatusOK, raw)
@@ -121,12 +122,14 @@ func (a *API) userInvites(user string) []map[string]any {
 }
 
 // respondInvite accepts or rejects an invitation. Accepting associates the user
-// with the org; either response clears the invite.
+// with the org and adds them to its "users" group; either response clears the
+// invite. A response other than accept/reject is rejected and leaves the invite
+// intact.
 func (a *API) respondInvite(w http.ResponseWriter, r *http.Request) {
 	user, id := r.PathValue("user"), r.PathValue("id")
 	org, ok := a.findInvite(user, id)
 	if !ok {
-		writeError(w, http.StatusNotFound, "Cannot find association request "+id)
+		writeError(w, http.StatusNotFound, "Cannot find association request: "+id)
 		return
 	}
 	var body struct {
@@ -136,14 +139,36 @@ func (a *API) respondInvite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	if body.Response != "accept" && body.Response != "reject" {
+		writeError(w, http.StatusBadRequest, "Param response must be either 'accept' or 'reject'")
+		return
+	}
 
 	org.Delete(assocReqColl, id)
 	if body.Response == "accept" {
 		org.Put(assocColl, user, mustEncode(map[string]any{"username": user}))
+		addUserToOrgGroup(org, "users", user)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"organization": map[string]any{"name": org.Name()},
 	})
+}
+
+// addUserToOrgGroup adds user to the named org group's user list (creating the
+// group if absent), so authorization membership reflects the new member.
+func addUserToOrgGroup(org *store.Org, group, user string) {
+	var users, clients, groups []string
+	if raw, ok := org.Get("groups", group); ok {
+		var g map[string]any
+		if json.Unmarshal(raw, &g) == nil {
+			users, clients, groups = groupMembers(g)
+		}
+	}
+	if slices.Contains(users, user) {
+		return
+	}
+	users = append(users, user)
+	org.Put("groups", group, mustEncode(groupDoc(group, users, clients, groups)))
 }
 
 // findInvite locates the org holding the given invitation id for the user.
