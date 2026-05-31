@@ -2,8 +2,35 @@ package api
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
+
+func TestCookbookArtifactsEmptyList(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	resp, body := do(t, "GET", base+"/cookbook_artifacts", "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("empty list = %d, want 200: %s", resp.StatusCode, body)
+	}
+	if strings.TrimSpace(body) != "{}" {
+		t.Fatalf("empty list body = %q, want {}", body)
+	}
+}
+
+func TestCookbookArtifactImmutableReupload(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	base := srv.URL + "/organizations/acme"
+	sum := uploadBlob(t, base, "package 'nginx'\n")
+	const ident = "1234567890abcdef1234567890abcdef12345678"
+	if resp, body := do(t, "PUT", base+"/cookbook_artifacts/nginx/"+ident, manifest("nginx", "1.0.0", sum)); resp.StatusCode != 201 {
+		t.Fatalf("first put = %d: %s", resp.StatusCode, body)
+	}
+	resp, body := do(t, "PUT", base+"/cookbook_artifacts/nginx/"+ident, manifest("nginx", "1.0.0", sum))
+	if resp.StatusCode != 409 {
+		t.Fatalf("re-upload = %d, want 409: %s", resp.StatusCode, body)
+	}
+}
 
 // uploadBlob pushes content into the file store so a manifest referencing its
 // checksum will validate. Returns the checksum.
