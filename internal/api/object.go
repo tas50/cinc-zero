@@ -5,9 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sync"
 
 	"github.com/tas50/cinc-zero/internal/store"
 )
+
+// listBufPool reuses response buffers across list requests so a large list does
+// not allocate (and discard) its whole JSON body every time.
+var listBufPool = sync.Pool{New: func() any { b := make([]byte, 0, 4096); return &b }}
 
 // registerObjectRoutes wires the standard Chef CRUD routes for a "named JSON
 // object" collection such as nodes, roles, or environments. These share an
@@ -28,17 +33,38 @@ func objectURL(r *http.Request, org, segment, name string) string {
 	return requestBaseURL(r) + "/organizations/" + org + "/" + segment + "/" + name
 }
 
+// listObjects returns the collection's name->URL map. The keys are already
+// sorted by the store, so the response is streamed directly into a reusable
+// buffer — writing the shared URL prefix once per entry — instead of building an
+// intermediate map and re-sorting and reflecting over it in encoding/json.
 func (a *API) listObjects(segment string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		org := a.org(w, r)
 		if org == nil {
 			return
 		}
-		out := map[string]string{}
-		for _, name := range org.Keys(segment) {
-			out[name] = objectURL(r, org.Name(), segment, name)
+		keys := org.Keys(segment) // sorted
+		// Every value is the same prefix followed by the (escaped) name; escape the
+		// constant prefix once rather than per entry.
+		prefix := appendJSONStringContent(nil, objectURL(r, org.Name(), segment, ""))
+
+		bufp := listBufPool.Get().(*[]byte)
+		b := append((*bufp)[:0], '{')
+		for i, k := range keys {
+			if i > 0 {
+				b = append(b, ',')
+			}
+			b = append(b, '"')
+			b = appendJSONStringContent(b, k)
+			b = append(b, '"', ':', '"')
+			b = append(b, prefix...)
+			b = appendJSONStringContent(b, k)
+			b = append(b, '"')
 		}
-		writeJSON(w, http.StatusOK, out)
+		b = append(b, '}')
+		writeRaw(w, http.StatusOK, b)
+		*bufp = b
+		listBufPool.Put(bufp)
 	}
 }
 
