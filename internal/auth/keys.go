@@ -7,12 +7,22 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 )
 
 // GenerateKey creates a new 2048-bit RSA key pair, the size Chef uses for
 // client and user keys.
 func GenerateKey() (*rsa.PrivateKey, error) {
-	return rsa.GenerateKey(rand.Reader, 2048)
+	return GenerateKeyFrom(rand.Reader)
+}
+
+// GenerateKeyFrom creates a 2048-bit RSA key pair drawing entropy from r. It
+// exists so callers generating several keys in parallel can give each goroutine
+// its own buffered reader over crypto/rand, avoiding lock contention on the
+// global rand.Reader during prime search. r must be a cryptographically secure
+// source (e.g. crypto/rand.Reader, optionally wrapped in a bufio.Reader).
+func GenerateKeyFrom(r io.Reader) (*rsa.PrivateKey, error) {
+	return rsa.GenerateKey(r, 2048)
 }
 
 // ParsePublicKey parses a PEM-encoded RSA public key. It accepts both
