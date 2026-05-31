@@ -145,11 +145,21 @@ func TestClassifyRequest(t *testing.T) {
 		// Cookbook pseudo-endpoints fall back to the container.
 		{"GET", "/organizations/acme/cookbooks/_latest", &authzCheck{aclType: "containers", aclName: "cookbooks", perm: "read"}},
 		{"PUT", "/organizations/acme/cookbook_artifacts/foo/abc123", &authzCheck{aclType: "cookbook_artifacts", aclName: "foo", perm: "update"}},
+		// Global users collection: superuser-only (list/create).
+		{"GET", "/users", &authzCheck{superuserOnly: true, perm: "read"}},
+		{"POST", "/users", &authzCheck{superuserOnly: true, perm: "create"}},
+		// Global single user: superuser-only, but the user may act on itself.
+		{"GET", "/users/bob", &authzCheck{superuserOnly: true, perm: "read", allowSelf: "bob"}},
+		{"PUT", "/users/bob", &authzCheck{superuserOnly: true, perm: "update", allowSelf: "bob"}},
+		{"DELETE", "/users/bob", &authzCheck{superuserOnly: true, perm: "delete", allowSelf: "bob"}},
+		// Global user ACLs: grant on the user object, evaluated in the global space.
+		{"GET", "/users/bob/_acl", &authzCheck{global: true, aclType: "users", aclName: "bob", perm: "grant"}},
+		{"PUT", "/users/bob/_acl/grant", &authzCheck{global: true, aclType: "users", aclName: "bob", perm: "grant"}},
 		// Unclassified: allow-through (no ACL restrictions or out of scope).
 		{"GET", "/organizations/acme/search/node", nil},
 		{"GET", "/organizations/acme/sandboxes", nil},
 		{"POST", "/organizations/acme/users", nil}, // org association
-		{"GET", "/users", nil},
+		{"GET", "/users/bob/keys", nil},            // user key sub-endpoints are not gated
 		{"POST", "/organizations", nil},
 		{"GET", "/organizations", nil},
 		{"GET", "/organizations/acme/policies/app/revisions/1.0.0", nil}, // sub-resource
@@ -292,5 +302,141 @@ func TestEnforceValidatorCreatesClient(t *testing.T) {
 		"POST", "/organizations/acme/clients", `{"name":"node1"}`)
 	if code != http.StatusCreated {
 		t.Fatalf("validator create client = %d, want 201; body %s", code, body)
+	}
+}
+
+// TestEnforceGroupsAndContainers locks in that the authz/{groups,containers}
+// endpoints are gated: a stranger (in no group) is denied, while an actor
+// granted the relevant ACE succeeds.
+func TestEnforceGroupsAndContainers(t *testing.T) {
+	h, st := enforcingHandler(t)
+	org, _ := st.Org("acme")
+	org.Put("groups", "grp1", mustEncode(groupDoc("grp1", nil, nil, nil)))
+	org.Put("containers", "cont1", []byte(`{"containername":"cont1"}`))
+	stranger := Actor{Name: "stranger"}
+
+	denied := []struct{ method, path, body string }{
+		{"GET", "/organizations/acme/groups", ""},
+		{"POST", "/organizations/acme/groups", `{"groupname":"g2"}`},
+		{"GET", "/organizations/acme/groups/grp1", ""},
+		{"PUT", "/organizations/acme/groups/grp1", `{"groupname":"grp1"}`},
+		{"DELETE", "/organizations/acme/groups/grp1", ""},
+		{"GET", "/organizations/acme/containers", ""},
+		{"POST", "/organizations/acme/containers", `{"containername":"c2"}`},
+		{"GET", "/organizations/acme/containers/cont1", ""},
+		{"DELETE", "/organizations/acme/containers/cont1", ""},
+	}
+	for _, c := range denied {
+		if code, body := authzReq(t, h, stranger, c.method, c.path, c.body); code != http.StatusForbidden {
+			t.Errorf("stranger %s %s = %d, want 403; body %s", c.method, c.path, code, body)
+		}
+	}
+
+	// A normal user granted update on the group's ACL may PUT it.
+	org.Put("acls", aclKey("groups", "grp1"), mustEncode(map[string]any{
+		"update": map[string]any{"actors": []string{"editor"}, "groups": []string{}},
+	}))
+	if code, body := authzReq(t, h, Actor{Name: "editor"}, "PUT", "/organizations/acme/groups/grp1", `{"groupname":"grp1"}`); code != http.StatusOK {
+		t.Errorf("editor PUT group with update ACE = %d, want 200; body %s", code, body)
+	}
+}
+
+// TestEnforceGlobalUsersSuperuserOnly covers the global /users collection:
+// non-superusers are denied list/create and operations on other users, but a
+// user may act on its own record and the superuser may act on any.
+func TestEnforceGlobalUsersSuperuserOnly(t *testing.T) {
+	h, st := enforcingHandler(t)
+	st.Global().Put("users", "bob", []byte(`{"username":"bob"}`))
+	st.Global().Put("users", "carol", []byte(`{"username":"carol"}`))
+
+	// A normal org admin is not a global admin: denied list/create and acting
+	// on another user.
+	admin := Actor{Name: "orgadmin"}
+	denied := []struct{ method, path, body string }{
+		{"GET", "/users", ""},
+		{"POST", "/users", `{"name":"new"}`},
+		{"GET", "/users/bob", ""},
+		{"PUT", "/users/bob", `{"username":"bob"}`},
+		{"DELETE", "/users/bob", ""},
+	}
+	for _, c := range denied {
+		if code, body := authzReq(t, h, admin, c.method, c.path, c.body); code != http.StatusForbidden {
+			t.Errorf("orgadmin %s %s = %d, want 403; body %s", c.method, c.path, code, body)
+		}
+	}
+
+	// bob may read and update its own record.
+	if code, body := authzReq(t, h, Actor{Name: "bob"}, "GET", "/users/bob", ""); code != http.StatusOK {
+		t.Errorf("bob GET self = %d, want 200; body %s", code, body)
+	}
+	if code, body := authzReq(t, h, Actor{Name: "bob"}, "PUT", "/users/bob", `{"username":"bob"}`); code != http.StatusOK {
+		t.Errorf("bob PUT self = %d, want 200; body %s", code, body)
+	}
+	// ...but not another user's record.
+	if code, _ := authzReq(t, h, Actor{Name: "bob"}, "PUT", "/users/carol", `{"username":"carol"}`); code != http.StatusForbidden {
+		t.Errorf("bob PUT carol = %d, want 403", code)
+	}
+
+	// The superuser may do anything.
+	su := Actor{Name: "pivotal", IsGlobalAdmin: true}
+	for _, c := range []struct{ method, path, body string }{
+		{"GET", "/users", ""},
+		{"PUT", "/users/bob", `{"username":"bob"}`},
+	} {
+		if code, body := authzReq(t, h, su, c.method, c.path, c.body); code == http.StatusForbidden {
+			t.Errorf("superuser %s %s = 403, want allowed; body %s", c.method, c.path, body)
+		}
+	}
+}
+
+// TestEnforceUserACL covers /users/<name>/_acl: an unauthorized normal user is
+// denied, an actor named directly on the grant ACE succeeds, and the superuser
+// bypasses.
+func TestEnforceUserACL(t *testing.T) {
+	h, st := enforcingHandler(t)
+	st.Global().Put("users", "bob", []byte(`{"username":"bob"}`))
+
+	stranger := Actor{Name: "stranger"}
+	for _, c := range []struct{ method, path, body string }{
+		{"GET", "/users/bob/_acl", ""},
+		{"GET", "/users/bob/_acl/grant", ""},
+		{"PUT", "/users/bob/_acl/grant", `{"grant":{"actors":[],"groups":[]}}`},
+	} {
+		if code, body := authzReq(t, h, stranger, c.method, c.path, c.body); code != http.StatusForbidden {
+			t.Errorf("stranger %s %s = %d, want 403; body %s", c.method, c.path, code, body)
+		}
+	}
+
+	// Grant "granter" the grant permission on bob's user object (global space).
+	st.Global().Put("acls", aclKey("users", "bob"), mustEncode(map[string]any{
+		"grant": map[string]any{"actors": []string{"granter"}, "groups": []string{}},
+	}))
+	if code, body := authzReq(t, h, Actor{Name: "granter"}, "GET", "/users/bob/_acl", ""); code != http.StatusOK {
+		t.Errorf("granter GET user acl = %d, want 200; body %s", code, body)
+	}
+	if code, body := authzReq(t, h, Actor{Name: "pivotal", IsGlobalAdmin: true}, "GET", "/users/bob/_acl", ""); code != http.StatusOK {
+		t.Errorf("superuser GET user acl = %d, want 200; body %s", code, body)
+	}
+}
+
+// TestEnforceOrgACL locks in that the organization's own ACL endpoint evaluates
+// the grant permission rather than returning 404: a grant-holder is allowed and
+// others are denied.
+func TestEnforceOrgACL(t *testing.T) {
+	h, st := enforcingHandler(t)
+	org, _ := st.Org("acme")
+	org.Put("acls", aclKey("organizations", "acme"), mustEncode(map[string]any{
+		"grant": map[string]any{"actors": []string{"granter"}, "groups": []string{}},
+	}))
+
+	if code, body := authzReq(t, h, Actor{Name: "stranger"}, "GET", "/organizations/acme/_acl", ""); code != http.StatusForbidden {
+		t.Errorf("stranger GET org acl = %d, want 403; body %s", code, body)
+	}
+	if code, body := authzReq(t, h, Actor{Name: "granter"}, "GET", "/organizations/acme/_acl", ""); code != http.StatusOK {
+		t.Errorf("granter GET org acl = %d, want 200; body %s", code, body)
+	}
+	if code, body := authzReq(t, h, Actor{Name: "granter"}, "PUT", "/organizations/acme/_acl/grant",
+		`{"grant":{"actors":["granter"],"groups":[]}}`); code != http.StatusOK {
+		t.Errorf("granter PUT org acl grant = %d, want 200; body %s", code, body)
 	}
 }
