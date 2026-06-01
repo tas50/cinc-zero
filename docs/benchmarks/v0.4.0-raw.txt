@@ -1,0 +1,33 @@
+### cinc-zero benchmark — 2026-05-31T18:28:58Z
+version: cinc-zero v0.3.0-6-g7330fe9 (commit 7330fe9, built 2026-05-31)
+host:    Darwin 25.5.0 arm64
+go:      go1.26.3
+chef-zero: 15.1.11
+params:  seed=500 warm=3000 dur=3000ms conc=10
+
+== cinc-zero cinc-zero v0.3.0-6-g7330fe9 (commit 7330fe9, built 2026-05-31) (no-auth) (http://127.0.0.1:8902/organizations/acme, auth=false) ==
+seeded 500 nodes (500 newly created)
+operation            cold ms    p50 ms    p95 ms        QPS@1       QPS@10
+GET node               0.320     0.053     0.073        17737        55376
+GET node list          0.934     0.130     0.177         7235        19376
+PUT node               0.654     0.068     0.103        13480        33177
+search *:*             1.988     1.073     1.343          910         3633
+search filtered        4.729     0.661     0.738         1485         9537
+
+== cinc-zero cinc-zero v0.3.0-6-g7330fe9 (commit 7330fe9, built 2026-05-31) (auth) (http://127.0.0.1:8903/organizations/acme, auth=true) ==
+seeded 500 nodes (500 newly created)
+operation            cold ms    p50 ms    p95 ms        QPS@1       QPS@10
+GET node               0.435     0.103     0.137         9113        27524
+GET node list          0.997     0.177     0.234         5322        10799
+PUT node               0.809     0.119     0.165         7819        20154
+search *:*             2.414     1.126     1.413          864         3305
+search filtered        5.551     0.708     0.785         1386         9294
+
+== chef-zero (gem) (http://127.0.0.1:8901/organizations/acme, auth=false) ==
+seeded 500 nodes (500 newly created)
+operation            cold ms    p50 ms    p95 ms        QPS@1       QPS@10
+GET node               3.908     2.080     2.439          469          492
+GET node list          5.596     3.634     3.966          273          269
+PUT node               3.237     2.163     2.651          448          465
+search *:*            48.545    38.681    40.149           26           26
+search filtered       33.098    22.989    24.030           43           43
