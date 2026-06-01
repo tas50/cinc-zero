@@ -1,0 +1,7 @@
+.git
+.github
+bin/
+dist/
+/cinc-zero
+*.pem
+.DS_Store
