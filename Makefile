@@ -15,7 +15,7 @@ LDFLAGS := -X $(LDFLAGS_PKG).version=$(VERSION) \
            -X $(LDFLAGS_PKG).commit=$(COMMIT) \
            -X $(LDFLAGS_PKG).buildDate=$(BUILD_DATE)
 
-.PHONY: all build dist install test conformance vet fmt tidy clean run help
+.PHONY: all build dist install test conformance vet fmt tidy clean run run-dev help
 
 all: build
 
@@ -71,6 +71,10 @@ clean:
 ## run: build and run cinc-zero (pass flags via ARGS="...")
 run: build
 	./$(BINARY) $(ARGS)
+
+## run-dev: build and run cinc-zero pre-loaded with the dev/test-repo seed (no auth, key written to ./dev-admin.pem)
+run-dev: build
+	./$(BINARY) --no-auth --state dev/test-repo --key-out dev-admin.pem $(ARGS)
 
 ## help: list available targets
 help:

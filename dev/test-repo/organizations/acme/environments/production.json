@@ -1,0 +1,9 @@
+{
+  "name": "production",
+  "description": "Production fleet",
+  "chef_type": "environment",
+  "json_class": "Chef::Environment",
+  "default_attributes": {},
+  "override_attributes": {},
+  "cookbook_versions": {}
+}

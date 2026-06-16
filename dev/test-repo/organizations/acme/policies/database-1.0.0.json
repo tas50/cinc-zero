@@ -1,0 +1,15 @@
+{
+  "name": "database",
+  "revision_id": "1.0.0",
+  "run_list": [
+    "recipe[database::default]"
+  ],
+  "named_run_lists": {},
+  "cookbook_locks": {},
+  "default_attributes": {},
+  "override_attributes": {},
+  "solution_dependencies": {
+    "Policyfile": [],
+    "dependencies": {}
+  }
+}

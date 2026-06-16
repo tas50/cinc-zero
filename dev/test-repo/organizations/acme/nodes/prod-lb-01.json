@@ -1,0 +1,54 @@
+{
+  "name": "prod-lb-01",
+  "chef_type": "node",
+  "json_class": "Chef::Node",
+  "default": {},
+  "override": {},
+  "chef_environment": "production",
+  "run_list": [
+    "role[base]",
+    "role[loadbalancer]"
+  ],
+  "normal": {
+    "tags": [
+      "prod-lb-01"
+    ]
+  },
+  "automatic": {
+    "fqdn": "prod-lb-01.acme.example.com",
+    "hostname": "prod-lb-01",
+    "machinename": "prod-lb-01",
+    "domain": "acme.example.com",
+    "ipaddress": "10.0.0.9",
+    "macaddress": "52:54:00:07:31:5b",
+    "platform": "debian",
+    "platform_family": "debian",
+    "platform_version": "12",
+    "os": "linux",
+    "os_version": "6.1.0-10-amd64",
+    "kernel": {
+      "name": "Linux",
+      "release": "6.1.0-10-amd64",
+      "machine": "x86_64",
+      "os": "GNU/Linux"
+    },
+    "cpu": {
+      "total": 1,
+      "model_name": "Intel(R) Xeon(R) CPU"
+    },
+    "memory": {
+      "total": "1048576kB"
+    },
+    "virtualization": {
+      "system": "kvm",
+      "role": "guest"
+    },
+    "chef_packages": {
+      "chef": {
+        "version": "18.4.12"
+      }
+    },
+    "ohai_time": 1718409600.0,
+    "uptime_seconds": 350000
+  }
+}

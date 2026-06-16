@@ -1,0 +1,12 @@
+{
+  "name": "production",
+  "uri": "",
+  "policies": {
+    "web-app": {
+      "revision_id": "1.0.0"
+    },
+    "database": {
+      "revision_id": "1.0.0"
+    }
+  }
+}
