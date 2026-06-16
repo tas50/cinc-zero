@@ -21,14 +21,18 @@ import (
 const defaultCookbookVersion = "0.0.0"
 
 var (
-	rbName    = regexp.MustCompile(`(?m)^\s*name\s+['"]([^'"]+)['"]`)
-	rbVersion = regexp.MustCompile(`(?m)^\s*version\s+['"]([^'"]+)['"]`)
-	rbDepends = regexp.MustCompile(`(?m)^\s*depends\s+['"]([^'"]+)['"]\s*(?:,\s*['"]([^'"]+)['"])?`)
+	rbName        = regexp.MustCompile(`(?m)^\s*name\s+['"]([^'"]+)['"]`)
+	rbVersion     = regexp.MustCompile(`(?m)^\s*version\s+['"]([^'"]+)['"]`)
+	rbLicense     = regexp.MustCompile(`(?m)^\s*license\s+['"]([^'"]+)['"]`)
+	rbDescription = regexp.MustCompile(`(?m)^\s*description\s+['"]([^'"]+)['"]`)
+	rbDepends     = regexp.MustCompile(`(?m)^\s*depends\s+['"]([^'"]+)['"]\s*(?:,\s*['"]([^'"]+)['"])?`)
 )
 
 type cookbookMetadata struct {
 	name         string
 	version      string
+	license      string
+	description  string
 	dependencies map[string]string
 }
 
@@ -103,6 +107,8 @@ func loadCookbook(org *store.Org, cbDir, dirName string) error {
 		"metadata": map[string]any{
 			"name":         meta.name,
 			"version":      meta.version,
+			"license":      meta.license,
+			"description":  meta.description,
 			"dependencies": meta.dependencies,
 		},
 	}
@@ -119,6 +125,8 @@ func readCookbookMetadata(cbDir, dirName string) (cookbookMetadata, error) {
 		var parsed struct {
 			Name         string            `json:"name"`
 			Version      string            `json:"version"`
+			License      string            `json:"license"`
+			Description  string            `json:"description"`
 			Dependencies map[string]string `json:"dependencies"`
 		}
 		if err := json.Unmarshal(data, &parsed); err != nil {
@@ -130,6 +138,8 @@ func readCookbookMetadata(cbDir, dirName string) (cookbookMetadata, error) {
 		if parsed.Version != "" {
 			meta.version = parsed.Version
 		}
+		meta.license = parsed.License
+		meta.description = parsed.Description
 		if parsed.Dependencies != nil {
 			meta.dependencies = parsed.Dependencies
 		}
@@ -143,6 +153,12 @@ func readCookbookMetadata(cbDir, dirName string) (cookbookMetadata, error) {
 		}
 		if m := rbVersion.FindStringSubmatch(text); m != nil {
 			meta.version = m[1]
+		}
+		if m := rbLicense.FindStringSubmatch(text); m != nil {
+			meta.license = m[1]
+		}
+		if m := rbDescription.FindStringSubmatch(text); m != nil {
+			meta.description = m[1]
 		}
 		for _, m := range rbDepends.FindAllStringSubmatch(text, -1) {
 			meta.dependencies[m[1]] = strings.TrimSpace(m[2])
