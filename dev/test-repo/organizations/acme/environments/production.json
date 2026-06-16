@@ -3,7 +3,36 @@
   "description": "Production fleet",
   "chef_type": "environment",
   "json_class": "Chef::Environment",
-  "default_attributes": {},
-  "override_attributes": {},
-  "cookbook_versions": {}
+  "default_attributes": {
+    "chef_client": {
+      "interval": 1800,
+      "splay": 300
+    },
+    "nginx": {
+      "worker_processes": "auto",
+      "worker_connections": 2048,
+      "keepalive_timeout": 65
+    },
+    "postgresql": {
+      "config": {
+        "max_connections": 400,
+        "shared_buffers": "8GB"
+      }
+    }
+  },
+  "override_attributes": {
+    "monitoring": {
+      "enabled": true,
+      "scrape_interval": "15s"
+    }
+  },
+  "cookbook_versions": {
+    "chef-client": "= 18.2.0",
+    "nginx": "= 11.2.0",
+    "postgresql": "= 11.1.0",
+    "haproxy": "= 12.2.1",
+    "redis": "= 6.0.1",
+    "prometheus": "= 2.4.0",
+    "app": "= 1.0.0"
+  }
 }

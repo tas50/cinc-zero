@@ -3,7 +3,33 @@
   "description": "Pre-production staging",
   "chef_type": "environment",
   "json_class": "Chef::Environment",
-  "default_attributes": {},
-  "override_attributes": {},
-  "cookbook_versions": {}
+  "default_attributes": {
+    "chef_client": {
+      "interval": 900,
+      "splay": 120
+    },
+    "nginx": {
+      "worker_processes": "auto",
+      "worker_connections": 1024
+    },
+    "postgresql": {
+      "config": {
+        "max_connections": 200,
+        "shared_buffers": "2GB"
+      }
+    }
+  },
+  "override_attributes": {
+    "monitoring": {
+      "enabled": true,
+      "scrape_interval": "30s"
+    }
+  },
+  "cookbook_versions": {
+    "chef-client": "~> 18.2",
+    "nginx": "~> 11.2",
+    "postgresql": "~> 11.1",
+    "jenkins": "~> 9.1",
+    "app": "~> 1.0"
+  }
 }

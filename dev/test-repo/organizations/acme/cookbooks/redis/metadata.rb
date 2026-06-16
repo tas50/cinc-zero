@@ -1,0 +1,7 @@
+name 'redis'
+maintainer 'ACME Platform'
+maintainer_email 'platform@acme.test'
+license 'Apache-2.0'
+description 'Installs and configures the Redis in-memory data store'
+version '6.0.1'
+chef_version '>= 16.0'

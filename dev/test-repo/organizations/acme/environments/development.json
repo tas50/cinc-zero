@@ -3,7 +3,25 @@
   "description": "Developer sandboxes",
   "chef_type": "environment",
   "json_class": "Chef::Environment",
-  "default_attributes": {},
-  "override_attributes": {},
-  "cookbook_versions": {}
+  "default_attributes": {
+    "chef_client": {
+      "interval": 300,
+      "splay": 60
+    },
+    "nginx": {
+      "worker_processes": 1,
+      "worker_connections": 512
+    }
+  },
+  "override_attributes": {
+    "monitoring": {
+      "enabled": false
+    }
+  },
+  "cookbook_versions": {
+    "chef-client": ">= 0.0.0",
+    "nginx": ">= 0.0.0",
+    "postgresql": ">= 0.0.0",
+    "app": ">= 0.0.0"
+  }
 }

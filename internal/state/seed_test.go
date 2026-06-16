@@ -42,6 +42,7 @@ func TestSeedCounts(t *testing.T) {
 		"nodes":            24,
 		"roles":            8,
 		"environments":     3,
+		"cookbooks":        8,
 		"policy_groups":    2,
 		"policy_revisions": 2,
 	} {
@@ -79,6 +80,77 @@ func TestSeedFauxhaiNodes(t *testing.T) {
 	// The fleet spans several platforms, not just one.
 	if len(platforms) < 4 {
 		t.Errorf("fleet spans %d platforms, want >= 4 for realism", len(platforms))
+	}
+}
+
+// TestSeedEnvironmentsHaveAttributesAndPins verifies the seed's environments
+// are realistic: each carries some default/override attributes and pins at
+// least one cookbook version, so the fixture exercises environment overrides
+// and version constraints rather than shipping empty stubs.
+func TestSeedEnvironmentsHaveAttributesAndPins(t *testing.T) {
+	_, org, _ := loadSeed(t)
+
+	for _, name := range org.Keys("environments") {
+		if name == "_default" {
+			continue
+		}
+		raw, _ := org.Get("environments", name)
+		var env struct {
+			DefaultAttributes  map[string]json.RawMessage `json:"default_attributes"`
+			OverrideAttributes map[string]json.RawMessage `json:"override_attributes"`
+			CookbookVersions   map[string]string          `json:"cookbook_versions"`
+		}
+		if err := json.Unmarshal(raw, &env); err != nil {
+			t.Fatalf("environment %s: %v", name, err)
+		}
+
+		if len(env.DefaultAttributes) == 0 && len(env.OverrideAttributes) == 0 {
+			t.Errorf("environment %s has no default/override attributes", name)
+		}
+		if len(env.CookbookVersions) == 0 {
+			t.Errorf("environment %s pins no cookbook versions", name)
+		}
+	}
+}
+
+// TestSeedRunListCookbooksLoaded verifies every cookbook named by a role
+// run-list recipe (recipe[<cookbook>::<recipe>]) is loaded into the seed, so
+// the fixture can actually resolve the recipes its nodes converge.
+func TestSeedRunListCookbooksLoaded(t *testing.T) {
+	_, org, _ := loadSeed(t)
+
+	loaded := map[string]bool{}
+	for _, key := range org.Keys("cookbooks") {
+		name, _, _ := strings.Cut(key, "/")
+		loaded[name] = true
+	}
+
+	referenced := map[string]bool{}
+	for _, name := range org.Keys("roles") {
+		raw, _ := org.Get("roles", name)
+		var role struct {
+			RunList []string `json:"run_list"`
+		}
+		if err := json.Unmarshal(raw, &role); err != nil {
+			t.Fatalf("role %s: %v", name, err)
+		}
+		for _, item := range role.RunList {
+			if !strings.HasPrefix(item, "recipe[") {
+				continue
+			}
+			spec := strings.TrimSuffix(strings.TrimPrefix(item, "recipe["), "]")
+			cookbook, _, _ := strings.Cut(spec, "::")
+			referenced[cookbook] = true
+		}
+	}
+
+	if len(referenced) == 0 {
+		t.Fatal("no recipe references found in role run-lists")
+	}
+	for cookbook := range referenced {
+		if !loaded[cookbook] {
+			t.Errorf("role run-lists reference cookbook %q but it is not loaded", cookbook)
+		}
 	}
 }
 
