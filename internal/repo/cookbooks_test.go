@@ -75,6 +75,72 @@ func TestLoadCookbookWithMetadataRB(t *testing.T) {
 	}
 }
 
+func TestLoadCookbookParsesLicenseAndDescriptionFromRB(t *testing.T) {
+	dir := t.TempDir()
+	writeRepo(t, dir, map[string]string{
+		"cookbooks/apache2/metadata.rb": "name 'apache2'\nversion '1.2.3'\nlicense 'Apache-2.0'\ndescription 'Installs and configures Apache'\n",
+	})
+
+	st := store.New()
+	org, _ := st.CreateOrg("acme")
+	if _, err := Load(org, dir); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	raw, ok := org.Get("cookbooks", "apache2/1.2.3")
+	if !ok {
+		t.Fatal("cookbook apache2/1.2.3 not stored")
+	}
+	var m struct {
+		Metadata struct {
+			License     string `json:"license"`
+			Description string `json:"description"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("decode manifest: %v", err)
+	}
+	if m.Metadata.License != "Apache-2.0" {
+		t.Fatalf("license = %q, want Apache-2.0; manifest=%s", m.Metadata.License, raw)
+	}
+	if m.Metadata.Description != "Installs and configures Apache" {
+		t.Fatalf("description = %q; manifest=%s", m.Metadata.Description, raw)
+	}
+}
+
+func TestLoadCookbookParsesLicenseAndDescriptionFromJSON(t *testing.T) {
+	dir := t.TempDir()
+	writeRepo(t, dir, map[string]string{
+		"cookbooks/nginx/metadata.json": `{"name":"nginx","version":"2.0.0","license":"MIT","description":"Installs NGINX"}`,
+	})
+
+	st := store.New()
+	org, _ := st.CreateOrg("acme")
+	if _, err := Load(org, dir); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	raw, ok := org.Get("cookbooks", "nginx/2.0.0")
+	if !ok {
+		t.Fatal("cookbook nginx/2.0.0 not stored")
+	}
+	var m struct {
+		Metadata struct {
+			License     string `json:"license"`
+			Description string `json:"description"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("decode manifest: %v", err)
+	}
+	if m.Metadata.License != "MIT" {
+		t.Fatalf("license = %q, want MIT; manifest=%s", m.Metadata.License, raw)
+	}
+	if m.Metadata.Description != "Installs NGINX" {
+		t.Fatalf("description = %q; manifest=%s", m.Metadata.Description, raw)
+	}
+}
+
 func TestLoadCookbookWithMetadataJSON(t *testing.T) {
 	dir := t.TempDir()
 	writeRepo(t, dir, map[string]string{
