@@ -1,0 +1,7 @@
+name 'chef-client'
+maintainer 'ACME Platform'
+maintainer_email 'platform@acme.test'
+license 'Apache-2.0'
+description 'Configures the Chef Infra Client run schedule'
+version '18.2.0'
+chef_version '>= 16.0'

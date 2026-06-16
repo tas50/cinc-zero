@@ -26,6 +26,11 @@ dev/test-repo/
       roles/                   base, web, database, cache, loadbalancer,
                                monitoring, app, ci
       environments/            production, staging, development
+                               (each with default/override attributes and
+                               cookbook version pins)
+      cookbooks/               app, chef-client, haproxy, jenkins, nginx,
+                               postgresql, prometheus, redis (one small
+                               version each, covering every run-list recipe)
       policies/                web-app-1.0.0, database-1.0.0 (Policyfile locks)
       policy_groups/           production, staging (pin both policies @ 1.0.0)
       groups/                  devs (authz group)

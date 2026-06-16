@@ -1,0 +1,7 @@
+name 'nginx'
+maintainer 'ACME Platform'
+maintainer_email 'platform@acme.test'
+license 'Apache-2.0'
+description 'Installs and configures the NGINX web server'
+version '11.2.0'
+chef_version '>= 16.0'
