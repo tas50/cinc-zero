@@ -1,0 +1,18 @@
+{
+  "groupname": "devs",
+  "name": "devs",
+  "actors": {
+    "users": [
+      "anna",
+      "ben"
+    ],
+    "groups": [],
+    "clients": []
+  },
+  "users": [
+    "anna",
+    "ben"
+  ],
+  "clients": [],
+  "groups": []
+}

@@ -1,0 +1,12 @@
+{
+  "name": "ci",
+  "description": "CI build agent",
+  "chef_type": "role",
+  "json_class": "Chef::Role",
+  "default_attributes": {},
+  "override_attributes": {},
+  "run_list": [
+    "recipe[jenkins::agent]"
+  ],
+  "env_run_lists": {}
+}

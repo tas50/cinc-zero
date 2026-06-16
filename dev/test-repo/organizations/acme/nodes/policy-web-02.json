@@ -1,0 +1,53 @@
+{
+  "name": "policy-web-02",
+  "chef_type": "node",
+  "json_class": "Chef::Node",
+  "default": {},
+  "override": {},
+  "chef_environment": "_default",
+  "run_list": [],
+  "policy_name": "web-app",
+  "policy_group": "production",
+  "normal": {
+    "tags": [
+      "policy-web-02"
+    ]
+  },
+  "automatic": {
+    "fqdn": "policy-web-02.acme.example.com",
+    "hostname": "policy-web-02",
+    "machinename": "policy-web-02",
+    "domain": "acme.example.com",
+    "ipaddress": "10.0.0.20",
+    "macaddress": "52:54:00:12:7e:ea",
+    "platform": "amazon",
+    "platform_family": "amazon",
+    "platform_version": "2023",
+    "os": "linux",
+    "os_version": "6.1.61-85.141.amzn2023.x86_64",
+    "kernel": {
+      "name": "Linux",
+      "release": "6.1.61-85.141.amzn2023.x86_64",
+      "machine": "x86_64",
+      "os": "GNU/Linux"
+    },
+    "cpu": {
+      "total": 1,
+      "model_name": "Intel(R) Xeon(R) CPU"
+    },
+    "memory": {
+      "total": "1048576kB"
+    },
+    "virtualization": {
+      "system": "kvm",
+      "role": "guest"
+    },
+    "chef_packages": {
+      "chef": {
+        "version": "18.4.12"
+      }
+    },
+    "ohai_time": 1718409600.0,
+    "uptime_seconds": 350000
+  }
+}

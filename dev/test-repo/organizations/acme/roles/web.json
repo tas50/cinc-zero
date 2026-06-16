@@ -1,0 +1,12 @@
+{
+  "name": "web",
+  "description": "NGINX web tier",
+  "chef_type": "role",
+  "json_class": "Chef::Role",
+  "default_attributes": {},
+  "override_attributes": {},
+  "run_list": [
+    "recipe[nginx::default]"
+  ],
+  "env_run_lists": {}
+}

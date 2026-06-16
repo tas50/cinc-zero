@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -29,6 +30,58 @@ func main() {
 	}
 }
 
+// cliFlags holds the parsed command-line options.
+type cliFlags struct {
+	addr        string
+	orgsCSV     string
+	admin       string
+	keyFile     string
+	noAuth      bool
+	enforceACLs bool
+	repo        string
+	state       string
+}
+
+// hiddenFlags are registered and functional but omitted from usage/help output
+// (experimental knobs). --state is hidden while its on-disk format settles.
+var hiddenFlags = map[string]bool{"state": true}
+
+// parseFlags defines the cinc-zero flag set, writing usage to out, and parses
+// args into cliFlags. The usage printer suppresses any flag in hiddenFlags.
+func parseFlags(args []string, out io.Writer) (*cliFlags, error) {
+	fs := flag.NewFlagSet("cinc-zero", flag.ContinueOnError)
+	fs.SetOutput(out)
+
+	var f cliFlags
+	fs.StringVar(&f.addr, "addr", "127.0.0.1:8889", "listen address (host:port)")
+	fs.StringVar(&f.orgsCSV, "orgs", "acme", "comma-separated organizations to create")
+	fs.StringVar(&f.admin, "admin", "pivotal", "bootstrap admin user name")
+	fs.StringVar(&f.keyFile, "key-out", "", "write the admin private key to this file")
+	fs.BoolVar(&f.noAuth, "no-auth", false, "disable request signature verification")
+	fs.BoolVar(&f.enforceACLs, "enforce-acls", false, "enforce object ACLs and group membership (default: permissive)")
+	fs.StringVar(&f.repo, "repo", "", "path to a chef-repo to load into the first org at startup")
+	fs.StringVar(&f.state, "state", "", "path to a full server-state directory to load at startup")
+
+	fs.Usage = func() {
+		fmt.Fprintf(out, "Usage of cinc-zero:\n")
+		fs.VisitAll(func(fl *flag.Flag) {
+			if hiddenFlags[fl.Name] {
+				return
+			}
+			line := fmt.Sprintf("  -%s", fl.Name)
+			if fl.DefValue != "" {
+				line += fmt.Sprintf(" (default %q)", fl.DefValue)
+			}
+			fmt.Fprintf(out, "%s\n    \t%s\n", line, fl.Usage)
+		})
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
+	return &f, nil
+}
+
 func run(args []string, out io.Writer) error {
 	if len(args) > 0 {
 		switch args[0] {
@@ -38,25 +91,23 @@ func run(args []string, out io.Writer) error {
 		}
 	}
 
-	fs := flag.NewFlagSet("cinc-zero", flag.ContinueOnError)
-	addr := fs.String("addr", "127.0.0.1:8889", "listen address (host:port)")
-	orgsCSV := fs.String("orgs", "acme", "comma-separated organizations to create")
-	admin := fs.String("admin", "pivotal", "bootstrap admin user name")
-	keyFile := fs.String("key-out", "", "write the admin private key to this file")
-	noAuth := fs.Bool("no-auth", false, "disable request signature verification")
-	enforceACLs := fs.Bool("enforce-acls", false, "enforce object ACLs and group membership (default: permissive)")
-	repoPath := fs.String("repo", "", "path to a chef-repo to load into the first org at startup")
-	if err := fs.Parse(args); err != nil {
+	f, err := parseFlags(args, out)
+	if err != nil {
+		// -h/-help is a clean exit, not a failure.
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 
 	srv, err := server.New(server.Options{
-		Addr:        *addr,
-		Orgs:        splitCSV(*orgsCSV),
-		AdminName:   *admin,
-		DisableAuth: *noAuth,
-		EnforceACL:  *enforceACLs,
-		Repo:        *repoPath,
+		Addr:        f.addr,
+		Orgs:        splitCSV(f.orgsCSV),
+		AdminName:   f.admin,
+		DisableAuth: f.noAuth,
+		EnforceACL:  f.enforceACLs,
+		Repo:        f.repo,
+		StatePath:   f.state,
 	})
 	if err != nil {
 		return err
@@ -65,17 +116,20 @@ func run(args []string, out io.Writer) error {
 		return err
 	}
 
-	if *keyFile != "" {
-		if err := os.WriteFile(*keyFile, srv.AdminKey(), 0o600); err != nil {
+	if f.keyFile != "" {
+		if err := os.WriteFile(f.keyFile, srv.AdminKey(), 0o600); err != nil {
 			return fmt.Errorf("write key file: %w", err)
 		}
-		fmt.Fprintf(out, "Admin key for %q written to %s\n", srv.AdminName(), *keyFile)
+		fmt.Fprintf(out, "Admin key for %q written to %s\n", srv.AdminName(), f.keyFile)
 	}
 	fmt.Fprintf(out, "cinc-zero listening on %s\n", srv.URL())
 	fmt.Fprintf(out, "  orgs: %s\n  admin user: %s (auth %s, acl-enforcement %s)\n",
-		*orgsCSV, srv.AdminName(), authState(*noAuth), enforceState(*enforceACLs))
-	if *repoPath != "" {
-		fmt.Fprintf(out, "  loaded chef-repo from %s\n", *repoPath)
+		f.orgsCSV, srv.AdminName(), authState(f.noAuth), enforceState(f.enforceACLs))
+	if f.repo != "" {
+		fmt.Fprintf(out, "  loaded chef-repo from %s\n", f.repo)
+	}
+	if f.state != "" {
+		fmt.Fprintf(out, "  loaded server state from %s\n", f.state)
 	}
 
 	stop := make(chan os.Signal, 1)

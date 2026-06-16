@@ -23,6 +23,7 @@ import (
 	"github.com/tas50/cinc-zero/internal/api"
 	"github.com/tas50/cinc-zero/internal/auth"
 	"github.com/tas50/cinc-zero/internal/repo"
+	"github.com/tas50/cinc-zero/internal/state"
 	"github.com/tas50/cinc-zero/internal/store"
 )
 
@@ -54,6 +55,12 @@ type Options struct {
 	// environments, clients, policies, policy_groups, data bags) are loaded
 	// into the first organization at startup, mirroring `knife upload`.
 	Repo string
+	// StatePath is an optional path to a full server-state directory (global
+	// users, every organization, and each org's chef-objects plus authz
+	// groups), loaded at startup. Unlike Repo it can populate multiple orgs and
+	// the global users/groups the chef-repo format cannot express. It cannot be
+	// combined with Repo, which a state directory already subsumes.
+	StatePath string
 }
 
 func (o *Options) withDefaults() {
@@ -95,6 +102,9 @@ func New(opts Options) (*Server, error) {
 	if opts.DisableAuth && opts.EnforceACL {
 		return nil, errors.New("EnforceACL requires authentication; do not set DisableAuth")
 	}
+	if opts.Repo != "" && opts.StatePath != "" {
+		return nil, errors.New("Repo and StatePath are mutually exclusive; a state directory already subsumes a chef-repo")
+	}
 	st := store.New()
 
 	// RSA-2048 key generation is the dominant startup cost and each key is
@@ -131,6 +141,15 @@ func New(opts Options) (*Server, error) {
 		}
 		if _, err := repo.Load(org, opts.Repo); err != nil {
 			return nil, fmt.Errorf("load repo %q: %w", opts.Repo, err)
+		}
+	}
+
+	// Hydrate the full server (global users, every org, groups) from disk, if
+	// configured. Orgs already bootstrapped above are loaded into; any extra
+	// orgs present in the state directory are created on the fly.
+	if opts.StatePath != "" {
+		if _, err := state.Load(st, opts.StatePath); err != nil {
+			return nil, fmt.Errorf("load state %q: %w", opts.StatePath, err)
 		}
 	}
 

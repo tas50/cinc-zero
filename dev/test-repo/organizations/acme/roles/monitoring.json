@@ -1,0 +1,12 @@
+{
+  "name": "monitoring",
+  "description": "Prometheus node exporter",
+  "chef_type": "role",
+  "json_class": "Chef::Role",
+  "default_attributes": {},
+  "override_attributes": {},
+  "run_list": [
+    "recipe[prometheus::exporter]"
+  ],
+  "env_run_lists": {}
+}

@@ -1,0 +1,12 @@
+{
+  "name": "cache",
+  "description": "Redis cache tier",
+  "chef_type": "role",
+  "json_class": "Chef::Role",
+  "default_attributes": {},
+  "override_attributes": {},
+  "run_list": [
+    "recipe[redis::default]"
+  ],
+  "env_run_lists": {}
+}

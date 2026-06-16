@@ -1,0 +1,54 @@
+{
+  "name": "prod-db-02",
+  "chef_type": "node",
+  "json_class": "Chef::Node",
+  "default": {},
+  "override": {},
+  "chef_environment": "production",
+  "run_list": [
+    "role[base]",
+    "role[database]"
+  ],
+  "normal": {
+    "tags": [
+      "prod-db-02"
+    ]
+  },
+  "automatic": {
+    "fqdn": "prod-db-02.acme.example.com",
+    "hostname": "prod-db-02",
+    "machinename": "prod-db-02",
+    "domain": "acme.example.com",
+    "ipaddress": "10.0.0.7",
+    "macaddress": "52:54:00:05:23:41",
+    "platform": "rocky",
+    "platform_family": "rhel",
+    "platform_version": "9.1",
+    "os": "linux",
+    "os_version": "5.14.0-162.6.1.el9_1.0.1.x86_64",
+    "kernel": {
+      "name": "Linux",
+      "release": "5.14.0-162.6.1.el9_1.0.1.x86_64",
+      "machine": "x86_64",
+      "os": "GNU/Linux"
+    },
+    "cpu": {
+      "total": 1,
+      "model_name": "Intel(R) Xeon(R) CPU"
+    },
+    "memory": {
+      "total": "1048576kB"
+    },
+    "virtualization": {
+      "system": "kvm",
+      "role": "guest"
+    },
+    "chef_packages": {
+      "chef": {
+        "version": "18.4.12"
+      }
+    },
+    "ohai_time": 1718409600.0,
+    "uptime_seconds": 350000
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "web-app",
+  "revision_id": "1.0.0",
+  "run_list": [
+    "recipe[web-app::default]"
+  ],
+  "named_run_lists": {},
+  "cookbook_locks": {},
+  "default_attributes": {},
+  "override_attributes": {},
+  "solution_dependencies": {
+    "Policyfile": [],
+    "dependencies": {}
+  }
+}

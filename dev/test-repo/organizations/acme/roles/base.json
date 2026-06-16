@@ -1,0 +1,12 @@
+{
+  "name": "base",
+  "description": "Baseline applied to every node",
+  "chef_type": "role",
+  "json_class": "Chef::Role",
+  "default_attributes": {},
+  "override_attributes": {},
+  "run_list": [
+    "recipe[chef-client::default]"
+  ],
+  "env_run_lists": {}
+}
