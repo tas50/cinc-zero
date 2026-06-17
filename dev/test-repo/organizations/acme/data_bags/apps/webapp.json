@@ -1,0 +1,18 @@
+{
+  "id": "webapp",
+  "comment": "Customer-facing web application served by nginx",
+  "repository": "https://github.com/acme/webapp.git",
+  "revision": "v2.4.1",
+  "deploy_to": "/srv/webapp",
+  "served_by": "nginx",
+  "environments": {
+    "production": {
+      "domain": "www.acme.example.com",
+      "replicas": 3
+    },
+    "staging": {
+      "domain": "staging.acme.example.com",
+      "replicas": 1
+    }
+  }
+}

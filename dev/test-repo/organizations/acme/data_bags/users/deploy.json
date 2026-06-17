@@ -1,0 +1,15 @@
+{
+  "id": "deploy",
+  "comment": "Deploy automation account",
+  "uid": 2001,
+  "gid": "deploy",
+  "home": "/home/deploy",
+  "shell": "/bin/bash",
+  "groups": [
+    "deploy",
+    "www-data"
+  ],
+  "ssh_keys": [
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJdeployACMEexamplekeydeployexamplekeydeploy deploy@acme.example.com"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "id": "jenkins",
+  "comment": "Jenkins CI service account",
+  "uid": 2003,
+  "gid": "jenkins",
+  "home": "/var/lib/jenkins",
+  "shell": "/bin/bash",
+  "groups": [
+    "jenkins"
+  ],
+  "ssh_keys": [
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJjenkinsACMEexamplekeyjenkinsexamplekeyjenkins jenkins@acme.example.com"
+  ]
+}
