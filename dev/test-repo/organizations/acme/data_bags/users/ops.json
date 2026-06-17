@@ -1,0 +1,15 @@
+{
+  "id": "ops",
+  "comment": "Operations administrator",
+  "uid": 2002,
+  "gid": "ops",
+  "home": "/home/ops",
+  "shell": "/bin/bash",
+  "groups": [
+    "ops",
+    "sudo"
+  ],
+  "ssh_keys": [
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJopsACMEexamplekeyopsexamplekeyopsexamplekey ops@acme.example.com"
+  ]
+}

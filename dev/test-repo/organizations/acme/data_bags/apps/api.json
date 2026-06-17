@@ -1,0 +1,19 @@
+{
+  "id": "api",
+  "comment": "Backend API service deployed by the app cookbook",
+  "repository": "https://github.com/acme/api.git",
+  "revision": "v1.9.0",
+  "deploy_to": "/srv/api",
+  "served_by": "app",
+  "port": 8080,
+  "environments": {
+    "production": {
+      "domain": "api.acme.example.com",
+      "replicas": 3
+    },
+    "staging": {
+      "domain": "api.staging.acme.example.com",
+      "replicas": 1
+    }
+  }
+}

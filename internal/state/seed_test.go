@@ -45,6 +45,8 @@ func TestSeedCounts(t *testing.T) {
 		"cookbooks":        8,
 		"policy_groups":    2,
 		"policy_revisions": 2,
+		"data_bags":        3,
+		"data_bag_items":   8,
 	} {
 		if got := acme.Counts[coll]; got != want {
 			t.Errorf("acme %s = %d, want %d", coll, got, want)
@@ -52,6 +54,41 @@ func TestSeedCounts(t *testing.T) {
 	}
 	if acme.Groups != 1 {
 		t.Errorf("acme groups = %d, want 1 (devs)", acme.Groups)
+	}
+}
+
+// TestSeedDataBags verifies the seed's data bags and items load and are
+// addressable: each expected bag exists, each item is stored under its bag
+// keyed by its own "id", and the item JSON carries that matching id — the shape
+// the data bag API serves.
+func TestSeedDataBags(t *testing.T) {
+	_, org, _ := loadSeed(t)
+
+	want := map[string][]string{
+		"users":   {"deploy", "ops", "jenkins"},
+		"secrets": {"postgresql", "redis", "jenkins"},
+		"apps":    {"webapp", "api"},
+	}
+	for bag, items := range want {
+		if _, ok := org.Get("data_bags", bag); !ok {
+			t.Errorf("data bag %q not loaded", bag)
+		}
+		for _, id := range items {
+			raw, ok := org.Get("databag_items:"+bag, id)
+			if !ok {
+				t.Errorf("data bag %q missing item %q", bag, id)
+				continue
+			}
+			var item struct {
+				ID string `json:"id"`
+			}
+			if err := json.Unmarshal(raw, &item); err != nil {
+				t.Fatalf("data bag %q item %q: %v", bag, id, err)
+			}
+			if item.ID != id {
+				t.Errorf("data bag %q item %q has id %q, want %q", bag, id, item.ID, id)
+			}
+		}
 	}
 }
 
