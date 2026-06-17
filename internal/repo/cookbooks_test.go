@@ -141,6 +141,94 @@ func TestLoadCookbookParsesLicenseAndDescriptionFromJSON(t *testing.T) {
 	}
 }
 
+func TestLoadCookbookParsesMaintainerAndURLsFromRB(t *testing.T) {
+	dir := t.TempDir()
+	writeRepo(t, dir, map[string]string{
+		"cookbooks/webserver/metadata.rb": "name 'webserver'\nversion '2.1.0'\n" +
+			"maintainer 'Acme Infra'\nmaintainer_email 'infra@acme.test'\n" +
+			"source_url 'https://github.com/acme/webserver'\n" +
+			"issues_url 'https://github.com/acme/webserver/issues'\n",
+	})
+
+	st := store.New()
+	org, _ := st.CreateOrg("acme")
+	if _, err := Load(org, dir); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	raw, ok := org.Get("cookbooks", "webserver/2.1.0")
+	if !ok {
+		t.Fatal("cookbook webserver/2.1.0 not stored")
+	}
+	var m struct {
+		Metadata struct {
+			Maintainer      string `json:"maintainer"`
+			MaintainerEmail string `json:"maintainer_email"`
+			SourceURL       string `json:"source_url"`
+			IssuesURL       string `json:"issues_url"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("decode manifest: %v", err)
+	}
+	if m.Metadata.Maintainer != "Acme Infra" {
+		t.Errorf("maintainer = %q; manifest=%s", m.Metadata.Maintainer, raw)
+	}
+	if m.Metadata.MaintainerEmail != "infra@acme.test" {
+		t.Errorf("maintainer_email = %q; manifest=%s", m.Metadata.MaintainerEmail, raw)
+	}
+	if m.Metadata.SourceURL != "https://github.com/acme/webserver" {
+		t.Errorf("source_url = %q; manifest=%s", m.Metadata.SourceURL, raw)
+	}
+	if m.Metadata.IssuesURL != "https://github.com/acme/webserver/issues" {
+		t.Errorf("issues_url = %q; manifest=%s", m.Metadata.IssuesURL, raw)
+	}
+}
+
+func TestLoadCookbookParsesMaintainerAndURLsFromJSON(t *testing.T) {
+	dir := t.TempDir()
+	writeRepo(t, dir, map[string]string{
+		"cookbooks/nginx/metadata.json": `{"name":"nginx","version":"2.0.0",` +
+			`"maintainer":"Acme Infra","maintainer_email":"infra@acme.test",` +
+			`"source_url":"https://github.com/acme/nginx",` +
+			`"issues_url":"https://github.com/acme/nginx/issues"}`,
+	})
+
+	st := store.New()
+	org, _ := st.CreateOrg("acme")
+	if _, err := Load(org, dir); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	raw, ok := org.Get("cookbooks", "nginx/2.0.0")
+	if !ok {
+		t.Fatal("cookbook nginx/2.0.0 not stored")
+	}
+	var m struct {
+		Metadata struct {
+			Maintainer      string `json:"maintainer"`
+			MaintainerEmail string `json:"maintainer_email"`
+			SourceURL       string `json:"source_url"`
+			IssuesURL       string `json:"issues_url"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("decode manifest: %v", err)
+	}
+	if m.Metadata.Maintainer != "Acme Infra" {
+		t.Errorf("maintainer = %q; manifest=%s", m.Metadata.Maintainer, raw)
+	}
+	if m.Metadata.MaintainerEmail != "infra@acme.test" {
+		t.Errorf("maintainer_email = %q; manifest=%s", m.Metadata.MaintainerEmail, raw)
+	}
+	if m.Metadata.SourceURL != "https://github.com/acme/nginx" {
+		t.Errorf("source_url = %q; manifest=%s", m.Metadata.SourceURL, raw)
+	}
+	if m.Metadata.IssuesURL != "https://github.com/acme/nginx/issues" {
+		t.Errorf("issues_url = %q; manifest=%s", m.Metadata.IssuesURL, raw)
+	}
+}
+
 func TestLoadCookbookWithMetadataJSON(t *testing.T) {
 	dir := t.TempDir()
 	writeRepo(t, dir, map[string]string{
