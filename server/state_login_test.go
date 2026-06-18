@@ -1,7 +1,9 @@
 package server
 
 import (
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -19,5 +21,25 @@ func TestSeededUserWebUILogin(t *testing.T) {
 	if got := statusOf(t, webuiSignedAs(t, srv, "anna", "POST",
 		srv.URL()+"/authenticate_user", `{"username":"anna","password":"wrong"}`)); got != http.StatusUnauthorized {
 		t.Fatalf("seeded anna wrong password = %d, want 401", got)
+	}
+}
+
+// The console's org picker lists a logged-in user's orgs; the seeded anna
+// belongs to acme.
+func TestSeededUserBelongsToOrg(t *testing.T) {
+	srv := startServer(t, Options{StatePath: "../dev/test-repo"})
+
+	resp, err := http.DefaultClient.Do(webuiSignedAs(t, srv, "anna", "GET",
+		srv.URL()+"/users/anna/organizations", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list anna orgs = %d: %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), `"acme"`) {
+		t.Fatalf("anna's orgs do not include acme: %s", body)
 	}
 }
