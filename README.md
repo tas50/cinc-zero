@@ -15,9 +15,11 @@ users, data bags, cookbooks (sandboxes, file store, artifacts, `/universe`),
 search, authz groups/containers, ACLs, key management, user↔org association and
 invites, and multi-org management. Mixlib authentication (v1.0 / 1.1 / 1.3) is
 verified byte-for-byte against the real gem, so unmodified `chef-client`,
-`knife`, and `cinc` clients just work. Crucially, **Policyfiles and policy
-groups are first-class**, with deploy and pull flows that chef-zero leaves on
-the table.
+`knife`, and `cinc` clients just work. **WebUI-key impersonation
+(`X-Ops-Request-Source: web`)** is supported too, so a management console such as
+cinc-console can sign on a user's behalf and have the server enforce that user's
+ACLs. Crucially, **Policyfiles and policy groups are first-class**, with deploy
+and pull flows that chef-zero leaves on the table.
 
 **Performance.** Built in Go, cinc-zero handles requests concurrently across all
 available cores. Its goroutine-per-request model scales naturally under the

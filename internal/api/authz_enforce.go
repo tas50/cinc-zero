@@ -319,6 +319,11 @@ type Actor struct {
 	// IsGlobalAdmin marks a global user with admin:true — Chef's "pivotal"
 	// superuser, which bypasses ACL checks entirely.
 	IsGlobalAdmin bool
+	// ViaWebUI marks a request the webui key signed on this actor's behalf
+	// (X-Ops-Request-Source: web). The webui is trusted like the superuser for
+	// credential checks (authenticate_user), while object operations still run
+	// as this actor under its own ACLs.
+	ViaWebUI bool
 }
 
 // actorGroups returns the set of group names the actor belongs to, expanding

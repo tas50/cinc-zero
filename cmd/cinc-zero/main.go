@@ -40,6 +40,7 @@ type cliFlags struct {
 	enforceACLs bool
 	repo        string
 	state       string
+	webuiKey    string
 }
 
 // hiddenFlags are registered and functional but omitted from usage/help output
@@ -61,6 +62,7 @@ func parseFlags(args []string, out io.Writer) (*cliFlags, error) {
 	fs.BoolVar(&f.enforceACLs, "enforce-acls", false, "enforce object ACLs and group membership (default: permissive)")
 	fs.StringVar(&f.repo, "repo", "", "path to a chef-repo to load into the first org at startup")
 	fs.StringVar(&f.state, "state", "", "path to a full server-state directory to load at startup")
+	fs.StringVar(&f.webuiKey, "webui-key", "", "path to a webui public/private key for X-Ops-Request-Source: web impersonation (defaults to the admin key)")
 
 	fs.Usage = func() {
 		fmt.Fprintf(out, "Usage of cinc-zero:\n")
@@ -100,6 +102,14 @@ func run(args []string, out io.Writer) error {
 		return err
 	}
 
+	var webuiKey []byte
+	if f.webuiKey != "" {
+		webuiKey, err = os.ReadFile(f.webuiKey)
+		if err != nil {
+			return fmt.Errorf("read webui key: %w", err)
+		}
+	}
+
 	srv, err := server.New(server.Options{
 		Addr:        f.addr,
 		Orgs:        splitCSV(f.orgsCSV),
@@ -108,6 +118,7 @@ func run(args []string, out io.Writer) error {
 		EnforceACL:  f.enforceACLs,
 		Repo:        f.repo,
 		StatePath:   f.state,
+		WebUIKey:    webuiKey,
 	})
 	if err != nil {
 		return err
@@ -130,6 +141,13 @@ func run(args []string, out io.Writer) error {
 	}
 	if f.state != "" {
 		fmt.Fprintf(out, "  loaded server state from %s\n", f.state)
+	}
+	if !f.noAuth {
+		webuiSrc := "admin key"
+		if f.webuiKey != "" {
+			webuiSrc = f.webuiKey
+		}
+		fmt.Fprintf(out, "  webui impersonation: enabled (key: %s)\n", webuiSrc)
 	}
 
 	stop := make(chan os.Signal, 1)
