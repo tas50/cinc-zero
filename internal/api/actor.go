@@ -89,7 +89,7 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 		// authenticate_user). Strip the transient/nested fields.
 		delete(obj, "chef_key")
 		delete(obj, "private_key")
-		stashPassword(org, name, obj)
+		StashPassword(org, name, obj)
 
 		raw := mustEncode(obj)
 		if err := org.Create(segment, name, raw); errors.Is(err, store.ErrConflict) {
@@ -186,7 +186,7 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 			return
 		}
 		delete(obj, "private_key")
-		stashPassword(org, name, obj)
+		StashPassword(org, name, obj)
 		raw := mustEncode(obj)
 		org.Put(segment, name, raw)
 		writeRaw(w, http.StatusOK, raw)

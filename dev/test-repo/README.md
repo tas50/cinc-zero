@@ -15,6 +15,27 @@ which is a superset of `--repo`: it hydrates global users, every organization,
 and each org's chef-objects **plus** authz groups. Data is read from disk at
 runtime — nothing is embedded in the binary.
 
+## Web login
+
+`anna` is seeded with a password so a management console (e.g. cinc-console) has
+a ready login. Run **with auth on** (not `--no-auth`) so the console's
+webui-signed `authenticate_user` is exercised:
+
+```sh
+cinc-zero --state dev/test-repo --key-out webui.pem   # admin key doubles as the webui key
+```
+
+| user | password | notes |
+| ---- | -------- | ----- |
+| `anna` | `anna123` | global user with a public key; logs in via `authenticate_user` |
+| `ben` | _(none)_ | global user, no web password |
+| `pivotal` | _(none)_ | bootstrap admin/superuser, key-only |
+
+Passwords are stashed out-of-band on load, mirroring `POST /users`: the
+`password` field is moved into the `passwords` collection and stripped from the
+stored user record, so it is never returned by the API. As elsewhere in
+cinc-zero the password is kept in memory as-is rather than hashed.
+
 ## Layout
 
 ```

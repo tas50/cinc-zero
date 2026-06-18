@@ -4,5 +4,6 @@
   "first_name": "Anna",
   "last_name": "Example",
   "email": "anna@example.com",
-  "public_key": ""
+  "password": "anna123",
+  "public_key": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxVnuj+H/oDGTYQksUcce\npTOWm4GEy1C1/IwVzYOd0/8xymbfVnzRA2AageyLoQTNj25WfZEn8MA/bAKvLyzo\nz8biaMKaIPnsQQIsqisc0wvgLNqgGj2ek74q3vDY36mfNFesUfxmQBxLLmi8HopI\nqwliqfC7kf/BA6zymBd8RsWmE/IGeYOXLFVUf/ONmL0j3vQeCH5U/Bzg1pdET07M\nXIkNj9lIaRtOwR25KG+eNGFpov2/jsxTo1miZAAdD7hG7GnbAv1s2kaZu8SHygaX\nV+J6Kr6W094FHroxHDvZ8AEinoro8XZsvsxLD8cAYaBcxlhzew9W0EyUlYC/5Fg4\n1wIDAQAB\n-----END PUBLIC KEY-----"
 }

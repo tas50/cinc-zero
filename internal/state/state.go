@@ -110,7 +110,15 @@ func loadGlobalUsers(st *store.Store, dir string) (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		st.Global().Put("users", objectKey(obj, "username", path), raw)
+		name := objectKey(obj, "username", path)
+		// Mirror POST /users: a "password" field is moved out-of-band into the
+		// passwords collection and stripped from the stored (and returned) user.
+		if api.StashPassword(st.Global(), name, obj) {
+			if raw, err = json.Marshal(obj); err != nil {
+				return 0, fmt.Errorf("%s: %w", path, err)
+			}
+		}
+		st.Global().Put("users", name, raw)
 		count++
 	}
 	return count, nil
