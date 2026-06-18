@@ -13,16 +13,21 @@ import (
 // server, so the password is kept as-is in memory; it is only ever compared,
 // never returned.
 
-const passwordsColl = "passwords"
+// PasswordsCollection is the store collection holding actor passwords,
+// out-of-band from the actor record (real Chef stores these hashed and never
+// returns them; cinc-zero keeps them in memory). authenticate_user reads it.
+const PasswordsCollection = "passwords"
 
-// stashPassword moves a "password" field out of an actor object into the
+// StashPassword moves a "password" field out of an actor object into the
 // out-of-band password store, so it is neither persisted in nor returned with
-// the actor record.
-func stashPassword(org *store.Org, name string, obj map[string]any) {
+// the actor record. It reports whether a password was present.
+func StashPassword(org *store.Org, name string, obj map[string]any) bool {
 	if pw, ok := obj["password"].(string); ok {
-		org.Put(passwordsColl, name, []byte(pw))
+		org.Put(PasswordsCollection, name, []byte(pw))
 		delete(obj, "password")
+		return true
 	}
+	return false
 }
 
 func (a *API) registerAuthenticateRoutes(mux *http.ServeMux) {
@@ -61,7 +66,7 @@ func (a *API) authenticateUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "Failed to authenticate. Username and password incorrect.")
 		return
 	}
-	stored, ok := global.Get(passwordsColl, name)
+	stored, ok := global.Get(PasswordsCollection, name)
 	if !ok || string(stored) != body.Password {
 		writeError(w, http.StatusUnauthorized, "Failed to authenticate. Username and password incorrect.")
 		return
