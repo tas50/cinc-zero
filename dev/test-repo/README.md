@@ -57,7 +57,13 @@ dev/test-repo/
       data_bags/               users (deploy, ops, jenkins), secrets
                                (postgresql, redis, jenkins), apps (webapp, api)
       groups/                  devs (authz group)
+      members.json             org membership: anna, ben
 ```
+
+`members.json` associates global users with the org (its `association_users`),
+so they appear under `GET /users/<name>/organizations` and a console's org
+picker. Each entry may be a bare `"username"` or an object shaped
+`{"username":…}` / `{"user":{"username":…}}` (knife-ec-backup style).
 
 `--state` loads each org's `nodes/ roles/ environments/ clients/ policies/
 policy_groups/ data_bags/ cookbooks/` through the same loader `--repo` uses,

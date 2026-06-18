@@ -10,7 +10,11 @@ import (
 // User↔organization association. A global user is associated with an org by
 // recording their username in the org's "association_users" collection.
 
-const assocColl = "association_users"
+// AssociationUsersCollection holds the usernames associated with an org (org
+// membership). Only the key matters; the value is a small record.
+const AssociationUsersCollection = "association_users"
+
+const assocColl = AssociationUsersCollection
 
 func (a *API) registerAssociationRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /organizations/{org}/users", a.listOrgUsers)

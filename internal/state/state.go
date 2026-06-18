@@ -79,6 +79,9 @@ func Load(st *store.Store, root string) (*Summary, error) {
 		if err != nil {
 			return nil, fmt.Errorf("org %q: %w", name, err)
 		}
+		if err := loadMembers(org, filepath.Join(orgDir, "members.json")); err != nil {
+			return nil, fmt.Errorf("org %q: %w", name, err)
+		}
 		sum.Orgs[name] = OrgSummary{Counts: repoSum.Counts, Groups: groups}
 	}
 	return sum, nil
@@ -142,6 +145,55 @@ func loadGroups(org *store.Org, dir string) (int, error) {
 		count++
 	}
 	return count, nil
+}
+
+// loadMembers associates the usernames in members.json with the org (its
+// association_users collection), mirroring POST /organizations/<org>/users.
+// The file is optional; each entry may be a bare "username" string or an object
+// shaped {"username":…} or {"user":{"username":…}} (knife-ec-backup style).
+func loadMembers(org *store.Org, path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var raw []json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	for _, item := range raw {
+		name := memberName(item)
+		if name == "" {
+			return fmt.Errorf("%s: member entry has no username", path)
+		}
+		val, _ := json.Marshal(map[string]any{"username": name})
+		org.Put(api.AssociationUsersCollection, name, val)
+	}
+	return nil
+}
+
+// memberName extracts a username from a members.json entry in any of the
+// accepted shapes.
+func memberName(item json.RawMessage) string {
+	var s string
+	if json.Unmarshal(item, &s) == nil {
+		return s
+	}
+	var obj struct {
+		Username string `json:"username"`
+		User     struct {
+			Username string `json:"username"`
+		} `json:"user"`
+	}
+	if json.Unmarshal(item, &obj) == nil {
+		if obj.Username != "" {
+			return obj.Username
+		}
+		return obj.User.Username
+	}
+	return ""
 }
 
 // subdirs returns the names of the immediate subdirectories of dir, sorted for
