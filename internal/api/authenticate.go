@@ -35,7 +35,7 @@ func (a *API) authenticateUser(w http.ResponseWriter, r *http.Request) {
 	// layer too), reject any non-admin caller. With no actor in context — auth
 	// disabled, or the API-layer tests — the endpoint stays open, matching the
 	// permissive default the rest of the package uses.
-	if actor, ok := actorFromContext(r.Context()); ok && !actor.IsGlobalAdmin {
+	if actor, ok := actorFromContext(r.Context()); ok && !actor.IsGlobalAdmin && !actor.ViaWebUI {
 		writeError(w, http.StatusForbidden, "You are not allowed to take this action.")
 		return
 	}

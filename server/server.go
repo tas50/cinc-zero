@@ -61,6 +61,12 @@ type Options struct {
 	// the global users/groups the chef-repo format cannot express. It cannot be
 	// combined with Repo, which a state directory already subsumes.
 	StatePath string
+	// WebUIKey is an optional PEM-encoded key (public or private) that a
+	// management console (e.g. cinc-console) uses to sign requests on behalf of
+	// users via the "X-Ops-Request-Source: web" header — the Chef Infra Server
+	// webui-impersonation mechanism. When empty, the bootstrap admin key doubles
+	// as the webui key, so the key written by --key-out works out of the box.
+	WebUIKey []byte
 }
 
 func (o *Options) withDefaults() {
@@ -91,6 +97,7 @@ type Server struct {
 	adminKey      []byte            // PEM-encoded admin private key
 	validatorKeys map[string][]byte // org name -> PEM-encoded validator private key
 	keyCache      *auth.PublicKeyCache
+	webuiPub      *rsa.PublicKey // verifies X-Ops-Request-Source: web requests
 	url           string
 }
 
@@ -123,6 +130,17 @@ func New(opts Options) (*Server, error) {
 	}
 	adminDoc := fmt.Sprintf(`{"username":%q,"admin":true,"public_key":%q}`, opts.AdminName, string(pubPEM))
 	st.Global().Put("users", opts.AdminName, []byte(adminDoc))
+
+	// The webui key verifies management-console requests (X-Ops-Request-Source:
+	// web). It defaults to the admin key, so the --key-out key acts as the webui
+	// key without extra setup; a distinct key may be supplied via WebUIKey.
+	webuiPub := &keys[0].PublicKey
+	if len(opts.WebUIKey) > 0 {
+		webuiPub, err = parseWebUIKey(opts.WebUIKey)
+		if err != nil {
+			return nil, fmt.Errorf("parse webui key: %w", err)
+		}
+	}
 
 	validatorKeys := make(map[string][]byte, len(opts.Orgs))
 	for i, name := range opts.Orgs {
@@ -159,6 +177,7 @@ func New(opts Options) (*Server, error) {
 		adminKey:      auth.EncodePrivateKeyPEM(keys[0]),
 		validatorKeys: validatorKeys,
 		keyCache:      auth.NewPublicKeyCache(),
+		webuiPub:      webuiPub,
 	}
 	handler := api.New(st, api.WithACLEnforcement(opts.EnforceACL)).Handler()
 	if !opts.DisableAuth {

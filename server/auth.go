@@ -41,6 +41,31 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		// Management-console impersonation: when a request is sourced from the
+		// web UI, its signature is made with the webui key (not the actor's own
+		// key) and X-Ops-Userid names the user being acted for. Verify against
+		// the webui key and run as that user. This mirrors Chef Infra Server's
+		// webui-key mechanism, which a console uses to honor each user's ACLs.
+		if strings.EqualFold(r.Header.Get("X-Ops-Request-Source"), "web") {
+			if err := auth.Verify(r.Method, r.URL.Path, body, parsed, r.Header.Get("X-Ops-Server-API-Version"), s.webuiPub); err != nil {
+				unauthorized(w, "Invalid webui signature for request source 'web'")
+				return
+			}
+			_, actor, ok := s.resolveAuth(r.URL.Path, parsed.UserID)
+			if !ok {
+				unauthorized(w, "Failed to authenticate as '"+parsed.UserID+"' via the web UI. Ensure the user exists.")
+				return
+			}
+			actor.ViaWebUI = true
+			if err := s.checkSkew(parsed.Timestamp); err != nil {
+				unauthorized(w, err.Error())
+				return
+			}
+			r = r.WithContext(api.WithActor(r.Context(), actor))
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		// One lookup resolves both the signing key and the actor identity from a
 		// single store read of the actor's record.
 		pub, actor, ok := s.resolveAuth(r.URL.Path, parsed.UserID)
@@ -83,6 +108,19 @@ func (s *Server) resolveAuth(path, name string) (*rsa.PublicKey, api.Actor, bool
 		return pub, api.Actor{Name: name, IsGlobalAdmin: admin}, true
 	}
 	return nil, api.Actor{}, false
+}
+
+// parseWebUIKey accepts a PEM-encoded RSA public or private key and returns the
+// public key used to verify web-sourced (management-console) requests.
+func parseWebUIKey(pemBytes []byte) (*rsa.PublicKey, error) {
+	if pub, err := auth.ParsePublicKey(pemBytes); err == nil {
+		return pub, nil
+	}
+	priv, err := auth.ParsePrivateKey(pemBytes)
+	if err != nil {
+		return nil, err
+	}
+	return &priv.PublicKey, nil
 }
 
 // parseActorRecord reads an actor record from a store collection and extracts
