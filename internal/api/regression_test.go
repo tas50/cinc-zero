@@ -148,6 +148,61 @@ func TestAssociateUserJoinsUsersGroup(t *testing.T) {
 	}
 }
 
+// TestActorPutPreservesPublicKey pins that updating a client/user with a body
+// that omits the public key keeps the stored key instead of dropping it — a
+// dropped key would break that actor's authentication.
+func TestActorPutPreservesPublicKey(t *testing.T) {
+	for _, tc := range []struct{ kind, base string }{
+		{"client", "/organizations/acme/clients"},
+		{"user", "/users"},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			srv, _ := newTestAPI(t)
+
+			if resp, body := do(t, "POST", srv.URL+tc.base, `{"name":"web01"}`); resp.StatusCode != http.StatusCreated {
+				t.Fatalf("create %s = %d: %s", tc.kind, resp.StatusCode, body)
+			}
+			_, body := do(t, "GET", srv.URL+tc.base+"/web01", "")
+			var before map[string]any
+			json.Unmarshal([]byte(body), &before)
+			key, _ := before["public_key"].(string)
+			if key == "" {
+				t.Fatalf("created %s has no public_key: %s", tc.kind, body)
+			}
+
+			// An update that does not re-send the key must not clear it.
+			if resp, b := do(t, "PUT", srv.URL+tc.base+"/web01", `{"name":"web01","validator":false}`); resp.StatusCode != http.StatusOK {
+				t.Fatalf("put %s = %d: %s", tc.kind, resp.StatusCode, b)
+			}
+			_, body = do(t, "GET", srv.URL+tc.base+"/web01", "")
+			var after map[string]any
+			json.Unmarshal([]byte(body), &after)
+			if got, _ := after["public_key"].(string); got != key {
+				t.Errorf("%s public_key after PUT = %q, want preserved %q", tc.kind, got, key)
+			}
+		})
+	}
+}
+
+// TestActorPutReplacesPublicKeyWhenProvided pins that a PUT carrying a new key
+// (top-level or nested under chef_key) still replaces the stored one.
+func TestActorPutReplacesPublicKeyWhenProvided(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	do(t, "POST", srv.URL+"/organizations/acme/clients", `{"name":"web01"}`)
+
+	const newKey = "-----BEGIN PUBLIC KEY-----\nREPLACED\n-----END PUBLIC KEY-----\n"
+	body, _ := json.Marshal(map[string]any{"name": "web01", "public_key": newKey})
+	if resp, b := do(t, "PUT", srv.URL+"/organizations/acme/clients/web01", string(body)); resp.StatusCode != http.StatusOK {
+		t.Fatalf("put = %d: %s", resp.StatusCode, b)
+	}
+	_, got := do(t, "GET", srv.URL+"/organizations/acme/clients/web01", "")
+	var after map[string]any
+	json.Unmarshal([]byte(got), &after)
+	if after["public_key"] != newKey {
+		t.Errorf("public_key = %v, want the provided replacement", after["public_key"])
+	}
+}
+
 // TestCreateDataBagStoresCanonicalJSON pins that a bag name is stored as
 // canonical JSON. The name was previously concatenated into a JSON string
 // literal, so a name containing a double quote produced a malformed,
