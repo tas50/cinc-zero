@@ -299,7 +299,17 @@ func (a *API) runSearch(w http.ResponseWriter, r *http.Request) {
 	start := queryInt(r, "start", 0)
 	rows := queryInt(r, "rows", defaultSearchRows)
 	total := len(matches)
-	window := matches[clamp(start, 0, total):clamp(start+rows, 0, total)]
+	// Clamp the window without ever computing start+rows directly: both are
+	// caller-supplied and can be near math.MaxInt, so the sum can overflow to a
+	// negative value and produce an invalid (low > high) slice. rows is
+	// non-negative (queryInt rejects negatives), so comparing it against the
+	// remaining row count is overflow-safe.
+	lo := clamp(start, 0, total)
+	hi := total
+	if rows <= total-lo {
+		hi = lo + rows
+	}
+	window := matches[lo:hi]
 
 	out := make([]any, 0, len(window))
 	for _, m := range window {

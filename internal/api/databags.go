@@ -58,7 +58,7 @@ func (a *API) createDataBag(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Field 'name' missing")
 		return
 	}
-	if err := org.Create(dataBagsColl, name, []byte(`{"name":"`+name+`"}`)); errors.Is(err, store.ErrConflict) {
+	if err := org.Create(dataBagsColl, name, mustEncode(map[string]any{"name": name})); errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, "Data bag already exists")
 		return
 	}

@@ -28,8 +28,13 @@ func (a *API) registerObjectRoutes(mux *http.ServeMux, segment string) {
 	mux.HandleFunc("HEAD "+base+"/{name}", a.headObject(segment))
 }
 
-// objectURL builds the absolute URL for a named object.
+// objectURL builds the absolute URL for a named object. Global collections
+// (users, which are not org-scoped) pass an empty org and are addressed at the
+// top level — "/users/{name}" — rather than under "/organizations//...".
 func objectURL(r *http.Request, org, segment, name string) string {
+	if org == "" {
+		return requestBaseURL(r) + "/" + segment + "/" + name
+	}
 	return requestBaseURL(r) + "/organizations/" + org + "/" + segment + "/" + name
 }
 
