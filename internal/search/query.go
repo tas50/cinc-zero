@@ -256,6 +256,13 @@ func lex(s string) ([]token, error) {
 			for i < len(s) && !strings.ContainsRune(" \t\n\r()[]{}\":", rune(s[i])) {
 				i++
 			}
+			if i == start {
+				// A delimiter with no lexer case of its own — a stray range
+				// closer ']' or '}' with no matching opener. It is neither
+				// consumed nor scanned over, so bail out instead of looping
+				// forever on it.
+				return nil, fmt.Errorf("search: unexpected character %q", s[i:i+1])
+			}
 			word := s[start:i]
 			switch word {
 			case "AND":

@@ -169,6 +169,20 @@ func unauthorized(w http.ResponseWriter, msg string) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": []string{msg}})
 }
 
+// limitBody caps the request body size so a single oversized request cannot
+// exhaust server memory when a handler reads the whole body into memory. It
+// applies to every path, including the unauthenticated file store. Reading past
+// the cap makes the body read fail, which the handler reports as a request
+// error (a 4xx) rather than an out-of-memory crash.
+func limitBody(next http.Handler, max int64) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, max)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // isFileStorePath reports whether path addresses the cookbook file store
 // (/organizations/{org}/file_store/{checksum}), which is served without auth.
 func isFileStorePath(path string) bool {
