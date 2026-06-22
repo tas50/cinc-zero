@@ -100,16 +100,21 @@ func principalDoc(name, typ string, actorRaw []byte) map[string]any {
 // withAPIVersion negotiates the server API version on every request. It runs
 // ahead of routing so version validation precedes method and content checks, as
 // Chef's documented precedence requires. It advertises the supported range in
-// the X-Ops-Server-API-Version response header and rejects any unacceptable
-// requested version — non-numeric, or numeric but outside the supported range —
-// with 406 Not Acceptable, matching Chef Infra Server's version negotiation.
+// the X-Ops-Server-API-Version response header and rejects an unacceptable
+// requested version: a non-numeric header is a 400 Bad Request, while a
+// well-formed version outside the supported range is a 406 Not Acceptable,
+// matching Chef Infra Server's version negotiation.
 func withAPIVersion(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		header := r.Header.Get("X-Ops-Server-API-Version")
 		requested, ok := parseAPIVersion(header)
 		if !ok {
+			// A malformed (non-integer) version is a bad request — distinct from a
+			// well-formed but unsupported version, which is 406 below. This matches
+			// Chef Infra Server, which 400s a non-numeric header and 406s an
+			// out-of-range one.
 			setVersionHeader(w, apiVersionMin, apiVersionMin)
-			writeError(w, http.StatusNotAcceptable,
+			writeError(w, http.StatusBadRequest,
 				"Invalid X-Ops-Server-API-Version header value "+strconv.Quote(strings.TrimSpace(header))+"; expected an integer.")
 			return
 		}

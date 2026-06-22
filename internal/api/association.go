@@ -85,6 +85,11 @@ func (a *API) associateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	org.Put(assocColl, username, mustEncode(map[string]any{"username": username}))
+	// Associating a user makes them an org member, so they join the org's
+	// "users" group — the same membership invite-acceptance grants (see
+	// respondInvite). Without this, a directly-associated user would lack the
+	// group-based permissions the default ACLs grant once enforcement is on.
+	addUserToOrgGroup(org, "users", username)
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"uri": requestBaseURL(r) + "/organizations/" + org.Name() + "/users/" + username,
 	})
