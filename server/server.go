@@ -67,6 +67,12 @@ type Options struct {
 	// webui-impersonation mechanism. When empty, the bootstrap admin key doubles
 	// as the webui key, so the key written by --key-out works out of the box.
 	WebUIKey []byte
+	// MaxBodyBytes caps the size of a request body the server will read into
+	// memory, so a single oversized request cannot exhaust memory. It applies to
+	// every path, including the unauthenticated cookbook file store (whose
+	// handler reads the uploaded file fully into memory). Defaults to 1 GiB; set
+	// a negative value to disable the limit.
+	MaxBodyBytes int64
 }
 
 func (o *Options) withDefaults() {
@@ -84,6 +90,9 @@ func (o *Options) withDefaults() {
 	}
 	if o.Now == nil {
 		o.Now = time.Now
+	}
+	if o.MaxBodyBytes == 0 {
+		o.MaxBodyBytes = 1 << 30 // 1 GiB
 	}
 }
 
@@ -182,6 +191,11 @@ func New(opts Options) (*Server, error) {
 	handler := api.New(st, api.WithACLEnforcement(opts.EnforceACL)).Handler()
 	if !opts.DisableAuth {
 		handler = s.authMiddleware(handler)
+	}
+	// Cap the request body outermost, so the limit is in force before any layer
+	// (auth, or a handler on an auth-exempt path) reads the body.
+	if opts.MaxBodyBytes > 0 {
+		handler = limitBody(handler, opts.MaxBodyBytes)
 	}
 	s.handler = handler
 	return s, nil
