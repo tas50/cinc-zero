@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 
@@ -67,7 +68,7 @@ func (a *API) authenticateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stored, ok := global.Get(PasswordsCollection, name)
-	if !ok || string(stored) != body.Password {
+	if !ok || subtle.ConstantTimeCompare(stored, []byte(body.Password)) != 1 {
 		writeError(w, http.StatusUnauthorized, "Failed to authenticate. Username and password incorrect.")
 		return
 	}

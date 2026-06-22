@@ -55,12 +55,7 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 		// A caller-supplied public key may arrive at the top level or nested
 		// under "chef_key" (the key-management shape knife/cinc send). Accept
 		// either; only generate a pair when no public key is provided.
-		pub, _ := obj["public_key"].(string)
-		if pub == "" {
-			if ck, ok := obj["chef_key"].(map[string]any); ok {
-				pub, _ = ck["public_key"].(string)
-			}
-		}
+		pub := bodyPublicKey(obj)
 		if pub != "" {
 			obj["public_key"] = pub
 		} else {
@@ -103,6 +98,36 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 // orgSegment returns the org path value, or "" for global (user) routes.
 func orgSegment(r *http.Request) string {
 	return r.PathValue("org")
+}
+
+// bodyPublicKey reads an actor's public key from a request body, accepting it
+// at the top level or nested under "chef_key" (the key-management shape knife
+// and cinc send). It returns "" when neither carries one.
+func bodyPublicKey(obj map[string]any) string {
+	if pub, _ := obj["public_key"].(string); pub != "" {
+		return pub
+	}
+	if ck, ok := obj["chef_key"].(map[string]any); ok {
+		if pub, _ := ck["public_key"].(string); pub != "" {
+			return pub
+		}
+	}
+	return ""
+}
+
+// storedPublicKey returns the public key already stored for an actor, or "" if
+// the actor does not exist or carries no key.
+func storedPublicKey(org *store.Org, segment, name string) string {
+	raw, ok := org.Get(segment, name)
+	if !ok {
+		return ""
+	}
+	var prev map[string]any
+	if json.Unmarshal(raw, &prev) != nil {
+		return ""
+	}
+	pub, _ := prev["public_key"].(string)
+	return pub
 }
 
 func (a *API) scopedList(segment string, scope scopeFunc) http.HandlerFunc {
@@ -186,6 +211,18 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 			return
 		}
 		delete(obj, "private_key")
+		// A PUT that omits the public key must not silently drop the actor's
+		// existing key — that would break its authentication. Carry the stored
+		// key forward (key changes go through the keys API, not a bare update),
+		// normalizing a nested chef_key to the top-level field either way.
+		pub := bodyPublicKey(obj)
+		if pub == "" {
+			pub = storedPublicKey(org, segment, name)
+		}
+		delete(obj, "chef_key")
+		if pub != "" {
+			obj["public_key"] = pub
+		}
 		StashPassword(org, name, obj)
 		raw := mustEncode(obj)
 		org.Put(segment, name, raw)
