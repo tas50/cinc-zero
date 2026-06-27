@@ -6,7 +6,7 @@ cinc-zero is a fully in-memory Chef Infra Server in Go for test pipelines. It sp
 
 ## Commands
 
-- `make build` — compile the `cinc-zero` binary (version metadata via ldflags).
+- `make build` — compile the `cinc-zero` binary (version metadata via ldflags); it lands at `./cinc-zero` in the repo root.
 - `make test` — `go test ./... -race -cover` (the full suite).
 - `make vet` / `make fmt` — `go vet ./...` / `gofmt -w .`.
 - `make conformance` — drives the real `knife` CLI against an in-process server; needs Cinc Workstation installed and is gated behind `-tags conformance` (skipped by default).
