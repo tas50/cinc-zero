@@ -1,0 +1,54 @@
+{
+  "name": "dev-app-01",
+  "chef_type": "node",
+  "json_class": "Chef::Node",
+  "default": {},
+  "override": {},
+  "chef_environment": "development",
+  "run_list": [
+    "role[base]",
+    "role[app]"
+  ],
+  "normal": {
+    "tags": [
+      "dev-app-01"
+    ]
+  },
+  "automatic": {
+    "fqdn": "dev-app-01.acme.example.com",
+    "hostname": "dev-app-01",
+    "machinename": "dev-app-01",
+    "domain": "acme.example.com",
+    "ipaddress": "10.0.1.55",
+    "macaddress": "52:54:00:00:00:66",
+    "platform": "amazon",
+    "platform_family": "amazon",
+    "platform_version": "2023",
+    "os": "linux",
+    "os_version": "6.1.61-85.141.amzn2023.x86_64",
+    "kernel": {
+      "name": "Linux",
+      "release": "6.1.61-85.141.amzn2023.x86_64",
+      "machine": "x86_64",
+      "os": "GNU/Linux"
+    },
+    "cpu": {
+      "total": 4,
+      "model_name": "Intel(R) Xeon(R) CPU"
+    },
+    "memory": {
+      "total": "16777216kB"
+    },
+    "virtualization": {
+      "system": "kvm",
+      "role": "guest"
+    },
+    "chef_packages": {
+      "chef": {
+        "version": "18.4.12"
+      }
+    },
+    "ohai_time": 1718412840.0,
+    "uptime_seconds": 404000
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "name": "prod-app-04",
+  "chef_type": "node",
+  "json_class": "Chef::Node",
+  "default": {},
+  "override": {},
+  "chef_environment": "production",
+  "run_list": [
+    "role[base]",
+    "role[app]"
+  ],
+  "normal": {
+    "tags": [
+      "prod-app-04"
+    ]
+  },
+  "automatic": {
+    "fqdn": "prod-app-04.acme.example.com",
+    "hostname": "prod-app-04",
+    "machinename": "prod-app-04",
+    "domain": "acme.example.com",
+    "ipaddress": "10.0.1.16",
+    "macaddress": "52:54:00:00:00:3f",
+    "platform": "suse",
+    "platform_family": "suse",
+    "platform_version": "15.2",
+    "os": "linux",
+    "os_version": "5.3.18-24.37-default",
+    "kernel": {
+      "name": "Linux",
+      "release": "5.3.18-24.37-default",
+      "machine": "x86_64",
+      "os": "GNU/Linux"
+    },
+    "cpu": {
+      "total": 8,
+      "model_name": "Intel(R) Xeon(R) CPU"
+    },
+    "memory": {
+      "total": "1048576kB"
+    },
+    "virtualization": {
+      "system": "kvm",
+      "role": "guest"
+    },
+    "chef_packages": {
+      "chef": {
+        "version": "18.4.12"
+      }
+    },
+    "ohai_time": 1718410500.0,
+    "uptime_seconds": 365000
+  }
+}
