@@ -1,0 +1,54 @@
+{
+  "name": "staging-ci-02",
+  "chef_type": "node",
+  "json_class": "Chef::Node",
+  "default": {},
+  "override": {},
+  "chef_environment": "staging",
+  "run_list": [
+    "role[base]",
+    "role[ci]"
+  ],
+  "normal": {
+    "tags": [
+      "staging-ci-02"
+    ]
+  },
+  "automatic": {
+    "fqdn": "staging-ci-02.acme.example.com",
+    "hostname": "staging-ci-02",
+    "machinename": "staging-ci-02",
+    "domain": "acme.example.com",
+    "ipaddress": "10.0.1.49",
+    "macaddress": "52:54:00:00:00:60",
+    "platform": "ubuntu",
+    "platform_family": "debian",
+    "platform_version": "22.04",
+    "os": "linux",
+    "os_version": "5.15.0-30-generic",
+    "kernel": {
+      "name": "Linux",
+      "release": "5.15.0-30-generic",
+      "machine": "x86_64",
+      "os": "GNU/Linux"
+    },
+    "cpu": {
+      "total": 1,
+      "model_name": "Intel(R) Xeon(R) CPU"
+    },
+    "memory": {
+      "total": "8388608kB"
+    },
+    "virtualization": {
+      "system": "kvm",
+      "role": "guest"
+    },
+    "chef_packages": {
+      "chef": {
+        "version": "18.4.12"
+      }
+    },
+    "ohai_time": 1718412480.0,
+    "uptime_seconds": 398000
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "name": "dev-db-03",
+  "chef_type": "node",
+  "json_class": "Chef::Node",
+  "default": {},
+  "override": {},
+  "chef_environment": "development",
+  "run_list": [
+    "role[base]",
+    "role[database]"
+  ],
+  "normal": {
+    "tags": [
+      "dev-db-03"
+    ]
+  },
+  "automatic": {
+    "fqdn": "dev-db-03.acme.example.com",
+    "hostname": "dev-db-03",
+    "machinename": "dev-db-03",
+    "domain": "acme.example.com",
+    "ipaddress": "10.0.1.59",
+    "macaddress": "52:54:00:00:00:6a",
+    "platform": "debian",
+    "platform_family": "debian",
+    "platform_version": "12",
+    "os": "linux",
+    "os_version": "6.1.0-10-amd64",
+    "kernel": {
+      "name": "Linux",
+      "release": "6.1.0-10-amd64",
+      "machine": "x86_64",
+      "os": "GNU/Linux"
+    },
+    "cpu": {
+      "total": 4,
+      "model_name": "Intel(R) Xeon(R) CPU"
+    },
+    "memory": {
+      "total": "8388608kB"
+    },
+    "virtualization": {
+      "system": "kvm",
+      "role": "guest"
+    },
+    "chef_packages": {
+      "chef": {
+        "version": "18.4.12"
+      }
+    },
+    "ohai_time": 1718413080.0,
+    "uptime_seconds": 408000
+  }
+}

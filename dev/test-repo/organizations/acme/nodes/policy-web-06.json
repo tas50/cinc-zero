@@ -1,0 +1,53 @@
+{
+  "name": "policy-web-06",
+  "chef_type": "node",
+  "json_class": "Chef::Node",
+  "default": {},
+  "override": {},
+  "chef_environment": "_default",
+  "run_list": [],
+  "policy_name": "web-app",
+  "policy_group": "production",
+  "normal": {
+    "tags": [
+      "policy-web-06"
+    ]
+  },
+  "automatic": {
+    "fqdn": "policy-web-06.acme.example.com",
+    "hostname": "policy-web-06",
+    "machinename": "policy-web-06",
+    "domain": "acme.example.com",
+    "ipaddress": "10.0.1.67",
+    "macaddress": "52:54:00:00:00:72",
+    "platform": "debian",
+    "platform_family": "debian",
+    "platform_version": "12",
+    "os": "linux",
+    "os_version": "6.1.0-10-amd64",
+    "kernel": {
+      "name": "Linux",
+      "release": "6.1.0-10-amd64",
+      "machine": "x86_64",
+      "os": "GNU/Linux"
+    },
+    "cpu": {
+      "total": 4,
+      "model_name": "Intel(R) Xeon(R) CPU"
+    },
+    "memory": {
+      "total": "2097152kB"
+    },
+    "virtualization": {
+      "system": "kvm",
+      "role": "guest"
+    },
+    "chef_packages": {
+      "chef": {
+        "version": "18.4.12"
+      }
+    },
+    "ohai_time": 1718413560.0,
+    "uptime_seconds": 416000
+  }
+}

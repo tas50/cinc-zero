@@ -43,7 +43,7 @@ dev/test-repo/
   users/                       global users: anna, ben
   organizations/
     acme/
-      nodes/                   24 nodes (see "Fleet" below)
+      nodes/                   99 nodes (see "Fleet" below)
       roles/                   base, web, database, cache, loadbalancer,
                                monitoring, app, ci
       environments/            production, staging, development
@@ -71,19 +71,22 @@ then layers on `users/` (global) and per-org `groups/`.
 
 ## Fleet
 
-24 nodes spanning three environments and both run-list (role-based) and
+99 nodes spanning three environments and both run-list (role-based) and
 Policyfile (policy-based) management:
 
-- **production** — web (×3), database (×2), cache, loadbalancer, monitoring
-- **staging** — web, database, app, ci
-- **development** — web, a bare box, a Windows box, database
-- **policy-based** — 8 nodes pinned to the `web-app` / `database` policies via
-  the `production` and `staging` policy groups (`chef_environment` `_default`,
-  as real policy nodes use)
+- **production** (42) — web (×15), app (×8), database (×8), cache (×5),
+  loadbalancer (×3), monitoring (×3)
+- **staging** (20) — web (×6), app (×5), database (×4), cache (×2), ci (×3)
+- **development** (18) — web (×5), app (×3), database (×3), bare boxes (×4),
+  Windows boxes (×3)
+- **policy-based** (19) — pinned to the `web-app` / `database` policies via the
+  `production` and `staging` policy groups (`chef_environment` `_default`, as
+  real policy nodes use)
 
 Run-lists reference only roles that exist here, and policy nodes reference only
 policies pinned in their group — the `internal/state` seed test enforces that
-there are no dangling references.
+there are no dangling references. Each node carries a unique `ipaddress` and
+`macaddress`; the original 24 use the low `10.0.0.x` range, the rest `10.0.1.x`+.
 
 ## Node automatic attributes — fauxhai provenance
 

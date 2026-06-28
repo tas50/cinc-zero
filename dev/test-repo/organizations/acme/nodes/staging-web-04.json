@@ -1,0 +1,54 @@
+{
+  "name": "staging-web-04",
+  "chef_type": "node",
+  "json_class": "Chef::Node",
+  "default": {},
+  "override": {},
+  "chef_environment": "staging",
+  "run_list": [
+    "role[base]",
+    "role[web]"
+  ],
+  "normal": {
+    "tags": [
+      "staging-web-04"
+    ]
+  },
+  "automatic": {
+    "fqdn": "staging-web-04.acme.example.com",
+    "hostname": "staging-web-04",
+    "machinename": "staging-web-04",
+    "domain": "acme.example.com",
+    "ipaddress": "10.0.1.37",
+    "macaddress": "52:54:00:00:00:54",
+    "platform": "rocky",
+    "platform_family": "rhel",
+    "platform_version": "9.1",
+    "os": "linux",
+    "os_version": "5.14.0-162.6.1.el9_1.0.1.x86_64",
+    "kernel": {
+      "name": "Linux",
+      "release": "5.14.0-162.6.1.el9_1.0.1.x86_64",
+      "machine": "x86_64",
+      "os": "GNU/Linux"
+    },
+    "cpu": {
+      "total": 1,
+      "model_name": "Intel(R) Xeon(R) CPU"
+    },
+    "memory": {
+      "total": "2097152kB"
+    },
+    "virtualization": {
+      "system": "kvm",
+      "role": "guest"
+    },
+    "chef_packages": {
+      "chef": {
+        "version": "18.4.12"
+      }
+    },
+    "ohai_time": 1718411760.0,
+    "uptime_seconds": 386000
+  }
+}

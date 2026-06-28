@@ -39,7 +39,7 @@ func TestSeedCounts(t *testing.T) {
 	}
 	acme := sum.Orgs["acme"]
 	for coll, want := range map[string]int{
-		"nodes":            24,
+		"nodes":            99,
 		"roles":            8,
 		"environments":     3,
 		"cookbooks":        8,

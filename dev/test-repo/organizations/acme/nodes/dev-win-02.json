@@ -1,0 +1,53 @@
+{
+  "name": "dev-win-02",
+  "chef_type": "node",
+  "json_class": "Chef::Node",
+  "default": {},
+  "override": {},
+  "chef_environment": "development",
+  "run_list": [
+    "role[base]"
+  ],
+  "normal": {
+    "tags": [
+      "dev-win-02"
+    ]
+  },
+  "automatic": {
+    "fqdn": "dev-win-02.acme.example.com",
+    "hostname": "dev-win-02",
+    "machinename": "dev-win-02",
+    "domain": "acme.example.com",
+    "ipaddress": "10.0.1.63",
+    "macaddress": "52:54:00:00:00:6e",
+    "platform": "windows",
+    "platform_family": "windows",
+    "platform_version": "10.0.20348",
+    "os": "windows",
+    "os_version": "10.0.20348",
+    "kernel": {
+      "name": "Microsoft Windows Server 2022 Datacenter",
+      "release": "10.0.20348",
+      "machine": "x86_64",
+      "os": "WINNT"
+    },
+    "cpu": {
+      "total": 4,
+      "model_name": "Intel(R) Xeon(R) CPU"
+    },
+    "memory": {
+      "total": "4194304kB"
+    },
+    "virtualization": {
+      "system": "kvm",
+      "role": "guest"
+    },
+    "chef_packages": {
+      "chef": {
+        "version": "18.4.12"
+      }
+    },
+    "ohai_time": 1718413320.0,
+    "uptime_seconds": 412000
+  }
+}

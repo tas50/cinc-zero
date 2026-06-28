@@ -1,0 +1,53 @@
+{
+  "name": "dev-box-04",
+  "chef_type": "node",
+  "json_class": "Chef::Node",
+  "default": {},
+  "override": {},
+  "chef_environment": "development",
+  "run_list": [
+    "role[base]"
+  ],
+  "normal": {
+    "tags": [
+      "dev-box-04"
+    ]
+  },
+  "automatic": {
+    "fqdn": "dev-box-04.acme.example.com",
+    "hostname": "dev-box-04",
+    "machinename": "dev-box-04",
+    "domain": "acme.example.com",
+    "ipaddress": "10.0.1.62",
+    "macaddress": "52:54:00:00:00:6d",
+    "platform": "almalinux",
+    "platform_family": "rhel",
+    "platform_version": "9.1",
+    "os": "linux",
+    "os_version": "5.14.0-162.6.1.el9_1.x86_64",
+    "kernel": {
+      "name": "Linux",
+      "release": "5.14.0-162.6.1.el9_1.x86_64",
+      "machine": "x86_64",
+      "os": "GNU/Linux"
+    },
+    "cpu": {
+      "total": 2,
+      "model_name": "Intel(R) Xeon(R) CPU"
+    },
+    "memory": {
+      "total": "2097152kB"
+    },
+    "virtualization": {
+      "system": "kvm",
+      "role": "guest"
+    },
+    "chef_packages": {
+      "chef": {
+        "version": "18.4.12"
+      }
+    },
+    "ohai_time": 1718413260.0,
+    "uptime_seconds": 411000
+  }
+}

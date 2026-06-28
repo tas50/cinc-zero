@@ -1,0 +1,53 @@
+{
+  "name": "policy-web-07",
+  "chef_type": "node",
+  "json_class": "Chef::Node",
+  "default": {},
+  "override": {},
+  "chef_environment": "_default",
+  "run_list": [],
+  "policy_name": "web-app",
+  "policy_group": "production",
+  "normal": {
+    "tags": [
+      "policy-web-07"
+    ]
+  },
+  "automatic": {
+    "fqdn": "policy-web-07.acme.example.com",
+    "hostname": "policy-web-07",
+    "machinename": "policy-web-07",
+    "domain": "acme.example.com",
+    "ipaddress": "10.0.1.68",
+    "macaddress": "52:54:00:00:00:73",
+    "platform": "redhat",
+    "platform_family": "rhel",
+    "platform_version": "9.3",
+    "os": "linux",
+    "os_version": "5.14.0-362.8.1.el9_3.x86_64",
+    "kernel": {
+      "name": "Linux",
+      "release": "5.14.0-362.8.1.el9_3.x86_64",
+      "machine": "x86_64",
+      "os": "GNU/Linux"
+    },
+    "cpu": {
+      "total": 8,
+      "model_name": "Intel(R) Xeon(R) CPU"
+    },
+    "memory": {
+      "total": "4194304kB"
+    },
+    "virtualization": {
+      "system": "kvm",
+      "role": "guest"
+    },
+    "chef_packages": {
+      "chef": {
+        "version": "18.4.12"
+      }
+    },
+    "ohai_time": 1718413620.0,
+    "uptime_seconds": 417000
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "name": "prod-web-13",
+  "chef_type": "node",
+  "json_class": "Chef::Node",
+  "default": {},
+  "override": {},
+  "chef_environment": "production",
+  "run_list": [
+    "role[base]",
+    "role[web]"
+  ],
+  "normal": {
+    "tags": [
+      "prod-web-13"
+    ]
+  },
+  "automatic": {
+    "fqdn": "prod-web-13.acme.example.com",
+    "hostname": "prod-web-13",
+    "machinename": "prod-web-13",
+    "domain": "acme.example.com",
+    "ipaddress": "10.0.1.10",
+    "macaddress": "52:54:00:00:00:39",
+    "platform": "ubuntu",
+    "platform_family": "debian",
+    "platform_version": "20.04",
+    "os": "linux",
+    "os_version": "5.11.0-1020-aws",
+    "kernel": {
+      "name": "Linux",
+      "release": "5.11.0-1020-aws",
+      "machine": "x86_64",
+      "os": "GNU/Linux"
+    },
+    "cpu": {
+      "total": 2,
+      "model_name": "Intel(R) Xeon(R) CPU"
+    },
+    "memory": {
+      "total": "16777216kB"
+    },
+    "virtualization": {
+      "system": "kvm",
+      "role": "guest"
+    },
+    "chef_packages": {
+      "chef": {
+        "version": "18.4.12"
+      }
+    },
+    "ohai_time": 1718410140.0,
+    "uptime_seconds": 359000
+  }
+}

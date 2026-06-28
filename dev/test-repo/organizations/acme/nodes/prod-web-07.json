@@ -1,0 +1,54 @@
+{
+  "name": "prod-web-07",
+  "chef_type": "node",
+  "json_class": "Chef::Node",
+  "default": {},
+  "override": {},
+  "chef_environment": "production",
+  "run_list": [
+    "role[base]",
+    "role[web]"
+  ],
+  "normal": {
+    "tags": [
+      "prod-web-07"
+    ]
+  },
+  "automatic": {
+    "fqdn": "prod-web-07.acme.example.com",
+    "hostname": "prod-web-07",
+    "machinename": "prod-web-07",
+    "domain": "acme.example.com",
+    "ipaddress": "10.0.1.4",
+    "macaddress": "52:54:00:00:00:33",
+    "platform": "redhat",
+    "platform_family": "rhel",
+    "platform_version": "9.3",
+    "os": "linux",
+    "os_version": "5.14.0-362.8.1.el9_3.x86_64",
+    "kernel": {
+      "name": "Linux",
+      "release": "5.14.0-362.8.1.el9_3.x86_64",
+      "machine": "x86_64",
+      "os": "GNU/Linux"
+    },
+    "cpu": {
+      "total": 8,
+      "model_name": "Intel(R) Xeon(R) CPU"
+    },
+    "memory": {
+      "total": "8388608kB"
+    },
+    "virtualization": {
+      "system": "kvm",
+      "role": "guest"
+    },
+    "chef_packages": {
+      "chef": {
+        "version": "18.4.12"
+      }
+    },
+    "ohai_time": 1718409780.0,
+    "uptime_seconds": 353000
+  }
+}
