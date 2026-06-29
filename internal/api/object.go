@@ -117,6 +117,10 @@ func (a *API) createObject(segment string) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		if err := a.grantCreator(r, org, segment, name); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		writeJSON(w, http.StatusCreated, map[string]string{
 			"uri": objectURL(r, org.Name(), segment, name),
 		})

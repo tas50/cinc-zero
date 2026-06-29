@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/tas50/cinc-zero/internal/store"
 )
@@ -135,6 +136,29 @@ func groupName(obj map[string]any) string {
 		}
 	}
 	return ""
+}
+
+// addClientToOrgGroup adds client to the named org group's clients list (a
+// no-op if already present), so a newly registered client is a member of the
+// org's "clients" group and inherits its ACL grants under enforcement — the
+// membership Chef gives clients so they can register and manage their own node.
+func addClientToOrgGroup(org *store.Org, group, client string) error {
+	var users, clients, groups []string
+	raw, ok, err := org.Get("groups", group)
+	if err != nil {
+		return err
+	}
+	if ok {
+		var g map[string]any
+		if json.Unmarshal(raw, &g) == nil {
+			users, clients, groups = groupMembers(g)
+		}
+	}
+	if slices.Contains(clients, client) {
+		return nil
+	}
+	clients = append(clients, client)
+	return org.Put("groups", group, mustEncode(groupDoc(group, users, clients, groups)))
 }
 
 // groupMembers pulls members from a group body. An update nests them under

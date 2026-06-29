@@ -97,6 +97,21 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		if err := a.grantCreator(r, org, segment, name); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		// Under enforcement, a regular client joins the org's "clients" group (as
+		// Chef does), so it can register and manage its own node. Validators stay
+		// outside the group — they may only create clients.
+		if a.enforceACL && segment == "clients" {
+			if isValidator, _ := obj["validator"].(bool); !isValidator {
+				if err := addClientToOrgGroup(org, "clients", name); err != nil {
+					writeError(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+			}
+		}
 		writeJSON(w, http.StatusCreated, resp)
 	}
 }
