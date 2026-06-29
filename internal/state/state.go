@@ -187,6 +187,12 @@ func loadMembers(org *store.Org, path string) error {
 		if err := org.Put(api.AssociationUsersCollection, name, val); err != nil {
 			return err
 		}
+		// Mirror associateUser: an org member joins the "users" group, so under
+		// ACL enforcement they inherit the default read grant (admins/users/
+		// clients) on the org's objects.
+		if err := api.AddUserToOrgGroup(org, "users", name); err != nil {
+			return err
+		}
 	}
 	return nil
 }

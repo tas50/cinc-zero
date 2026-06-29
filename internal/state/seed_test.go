@@ -171,8 +171,8 @@ func TestSeedCounts(t *testing.T) {
 			t.Errorf("acme %s = %d, want %d", coll, got, want)
 		}
 	}
-	if acme.Groups != 1 {
-		t.Errorf("acme groups = %d, want 1 (devs)", acme.Groups)
+	if acme.Groups != 2 {
+		t.Errorf("acme groups = %d, want 2 (admins, devs)", acme.Groups)
 	}
 }
 

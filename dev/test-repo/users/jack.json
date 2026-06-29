@@ -1,0 +1,8 @@
+{
+  "username": "jack",
+  "display_name": "Jack Example",
+  "first_name": "Jack",
+  "last_name": "Example",
+  "email": "jack@example.com",
+  "public_key": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAi4rjrKAVDLSwrPSKvVxJ\n8z7cXEQYTVb2wlJJcmMc9lFISVGHiUnX6Z7E758FFMs8o7DGb09w6lTLANPQzNec\n/FRQiBRAQ1+UeFDIBhvvjKSijyJUX+TmVntJdcq0cdeLw/9ySccA9RT2/X5aZGNF\nLXEai7wMH379IL62RruZ9PBWRgpeiUM3lyiltBkKKkE3wd9GVpMftTdxgykbYRFL\nDnaTGeS9aZK6DrxmIcUEBzTnrUca/dTaCw8o5eJGrhxBMuhAi3Y4ApB4xt7vLwNC\nVpXZdqBWWESTXo8OeSW4XKV9fGS+bL1jkjf+a0WYJN8HoRCRb79+2M7KQSg15cDL\n6wIDAQAB\n-----END PUBLIC KEY-----"
+}

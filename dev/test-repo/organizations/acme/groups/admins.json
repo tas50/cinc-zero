@@ -1,0 +1,16 @@
+{
+  "groupname": "admins",
+  "name": "admins",
+  "actors": {
+    "users": [
+      "tim"
+    ],
+    "groups": [],
+    "clients": []
+  },
+  "users": [
+    "tim"
+  ],
+  "clients": [],
+  "groups": []
+}

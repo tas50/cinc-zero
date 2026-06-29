@@ -81,16 +81,25 @@ The seed ships these credentials (all members of org **`acme`**):
 
 | User      | Password   | Role                                                    |
 |-----------|------------|---------------------------------------------------------|
-| `anna`    | `anna123`  | Regular user, member of `acme` (and its `devs` group).  |
-| `ben`     | _(none)_   | Regular user, member of `acme`; no password set.        |
+| `tim`     | `tim123`   | **Org admin** of `acme` — in its `admins` group, so the console shows full read/write access (and grant). |
+| `jack`    | _(none)_   | Regular member of `acme` (in its `users` group): read access, no admin/grant. Has a key but no password, so no console login. |
 | `pivotal` | _(none)_   | Bootstrap **superuser** (key-based). Its private key is `dev-admin.pem`. |
 
-`pivotal` authenticates with the key in `dev-admin.pem`, not a password. `anna`
+Access levels mirror a real Chef Infra Server. `tim` is a full org admin — the
+seed equivalent of `chef-server-ctl org-user-add acme tim --admin` (membership
+in the org's `admins` group grants every permission on every object). `jack` is
+a plain member: the loader adds every `members.json` user to the `users` group
+(as `POST /organizations/<org>/users` does), so they inherit the default read
+ACL but not admin/grant. Under ACL enforcement a console acts **as the
+logged-in user**, so `tim` sees and edits everything while `jack` can browse but
+not, e.g., change ACLs.
+
+`pivotal` authenticates with the key in `dev-admin.pem`, not a password. `tim`
 can sign in with a password, which is what a console's user login uses:
 
 ```sh
 curl -X POST http://127.0.0.1:8889/authenticate_user \
-  -d '{"username":"anna","password":"anna123"}'
+  -d '{"username":"tim","password":"tim123"}'
 # => {"status":"linked", ...}
 ```
 
@@ -113,7 +122,7 @@ no extra setup. (To use a distinct key instead, pass `--webui-key <path>`.)
    - **Chef server URL:** `http://127.0.0.1:8889/organizations/acme`
    - **webui key:** the contents of `./dev-admin.pem`
 
-3. Sign in to the console as a seeded user — **`anna` / `anna123`** — to browse
+3. Sign in to the console as a seeded user — **`tim` / `tim123`** — to browse
    the `acme` org's nodes, roles, environments, data bags, cookbooks, and
    Policyfiles, with the server enforcing that user's view.
 
