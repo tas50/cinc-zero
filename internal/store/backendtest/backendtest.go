@@ -5,6 +5,7 @@ package backendtest
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -33,6 +34,9 @@ func Run(t *testing.T, newBackend func(t *testing.T) store.Backend) {
 	t.Run("SortOrderFidelity", func(t *testing.T) { testSortOrderFidelity(t, newBackend(t)) })
 	t.Run("OpaqueBodies", func(t *testing.T) { testOpaqueBodies(t, newBackend(t)) })
 	t.Run("Concurrency", func(t *testing.T) { testConcurrency(t, newBackend(t)) })
+	t.Run("TxCommit", func(t *testing.T) { testTxCommit(t, newBackend(t)) })
+	t.Run("TxRollback", func(t *testing.T) { testTxRollback(t, newBackend(t)) })
+	t.Run("TxReadsOwnWrites", func(t *testing.T) { testTxReadsOwnWrites(t, newBackend(t)) })
 }
 
 func mustPut(t *testing.T, b store.Backend, org, coll, key, val string) {
@@ -364,5 +368,71 @@ func testConcurrency(t *testing.T, b store.Backend) {
 	}
 	if len(keys) != workers*ops {
 		t.Fatalf("lost writes under concurrency: got %d keys, want %d", len(keys), workers*ops)
+	}
+}
+
+// testTxCommit asserts a Tx that returns nil applies all of its writes atomically.
+func testTxCommit(t *testing.T, b store.Backend) {
+	err := b.Tx(func(tx store.Backend) error {
+		if err := tx.CreateOrg("acme"); err != nil {
+			return err
+		}
+		return tx.Put("acme", "nodes", "web", []byte(`{"v":1}`))
+	})
+	if err != nil {
+		t.Fatalf("Tx commit: %v", err)
+	}
+	got, ok, err := b.Get("acme", "nodes", "web")
+	if err != nil || !ok || string(got) != `{"v":1}` {
+		t.Fatalf("committed write not visible: got=%q ok=%v err=%v", got, ok, err)
+	}
+	if ok, _ := b.HasOrg("acme"); !ok {
+		t.Fatal("committed CreateOrg not visible after Tx")
+	}
+}
+
+// testTxRollback asserts a Tx whose fn returns an error discards every write made
+// inside it and propagates that error.
+func testTxRollback(t *testing.T, b store.Backend) {
+	mustPut(t, b, "acme", "nodes", "web", `{"v":1}`)
+	sentinel := errors.New("boom")
+	err := b.Tx(func(tx store.Backend) error {
+		if err := tx.Put("acme", "nodes", "web", []byte(`{"v":2}`)); err != nil {
+			return err
+		}
+		if err := tx.Put("acme", "roles", "base", []byte(`{}`)); err != nil {
+			return err
+		}
+		return sentinel
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("Tx should propagate fn's error, got %v", err)
+	}
+	got, _, _ := b.Get("acme", "nodes", "web")
+	if string(got) != `{"v":1}` {
+		t.Fatalf("rolled-back overwrite leaked: %q", got)
+	}
+	if _, ok, _ := b.Get("acme", "roles", "base"); ok {
+		t.Fatal("rolled-back create leaked")
+	}
+}
+
+// testTxReadsOwnWrites asserts reads inside a Tx observe that Tx's prior writes.
+func testTxReadsOwnWrites(t *testing.T, b store.Backend) {
+	err := b.Tx(func(tx store.Backend) error {
+		if err := tx.Put("acme", "nodes", "web", []byte(`{"v":1}`)); err != nil {
+			return err
+		}
+		got, ok, err := tx.Get("acme", "nodes", "web")
+		if err != nil {
+			return err
+		}
+		if !ok || string(got) != `{"v":1}` {
+			return fmt.Errorf("tx did not read its own write: got=%q ok=%v", got, ok)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Tx: %v", err)
 	}
 }

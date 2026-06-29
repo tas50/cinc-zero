@@ -44,41 +44,43 @@ func CreateOrganization(st *store.Store, name, fullName string) ([]byte, error) 
 // bootstrap generate all of its keys in parallel (the slow part) and then seed
 // the store serially. This helper is shared by the POST handler and bootstrap.
 func CreateOrganizationWithKey(st *store.Store, name, fullName string, key *rsa.PrivateKey) ([]byte, error) {
-	org, err := st.CreateOrg(name)
-	if err != nil {
-		return nil, err
-	}
-	if err := SeedOrg(org); err != nil {
-		return nil, err
-	}
-
 	guid, err := randomGUID()
 	if err != nil {
 		return nil, err
 	}
-	meta := map[string]any{"name": name, "full_name": fullName, "guid": guid}
-	if err := st.Global().Put(orgsColl, name, mustEncode(meta)); err != nil {
-		return nil, err
-	}
-
 	pubPEM, err := auth.EncodePublicKeyPEM(&key.PublicKey)
 	if err != nil {
 		return nil, err
 	}
+	meta := map[string]any{"name": name, "full_name": fullName, "guid": guid}
 	validator := name + "-validator"
 	clientDoc := fmt.Sprintf(`{"name":%q,"clientname":%q,"validator":true,"public_key":%q}`,
 		validator, validator, string(pubPEM))
-	if err := org.Put("clients", validator, []byte(clientDoc)); err != nil {
-		return nil, err
-	}
-
-	// Grant the validator create on the clients container, mirroring a real
-	// org where the validator key can register new clients/nodes. This is
-	// structural until ACL enforcement is enabled, at which point it lets a
-	// freshly bootstrapped org behave like a real one.
+	// Grant the validator create on the clients container, mirroring a real org
+	// where the validator key can register new clients/nodes. This is structural
+	// until ACL enforcement is enabled, at which point it lets a freshly
+	// bootstrapped org behave like a real one.
 	clientsACL := defaultACL()
 	clientsACL["create"] = map[string]any{"actors": []string{validator}, "groups": []string{"admins", "users"}}
-	if err := org.Put("acls", aclKey("containers", "clients"), mustEncode(clientsACL)); err != nil {
+
+	// Provision the org atomically: a failure partway through (more likely on a
+	// durable backend) must not leave a half-created organization behind.
+	if err := st.Tx(func(tx *store.Store) error {
+		org, err := tx.CreateOrg(name)
+		if err != nil {
+			return err
+		}
+		if err := SeedOrg(org); err != nil {
+			return err
+		}
+		if err := tx.Global().Put(orgsColl, name, mustEncode(meta)); err != nil {
+			return err
+		}
+		if err := org.Put("clients", validator, []byte(clientDoc)); err != nil {
+			return err
+		}
+		return org.Put("acls", aclKey("containers", "clients"), mustEncode(clientsACL))
+	}); err != nil {
 		return nil, err
 	}
 

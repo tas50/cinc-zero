@@ -36,5 +36,11 @@ type Backend interface {
 	ListOrgs() ([]string, error) // named orgs only, sorted
 	HasOrg(name string) (bool, error)
 
+	// Tx runs fn as a single atomic unit: the Backend passed to fn applies all of
+	// its writes together when fn returns nil, and discards them when fn returns a
+	// non-nil error (which Tx propagates). Implementations must not be entered
+	// recursively. Reads inside fn observe fn's own prior writes.
+	Tx(fn func(tx Backend) error) error
+
 	Close() error
 }
