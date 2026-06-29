@@ -9,7 +9,9 @@ requests. Run it fully **in memory** for instant, disposable test servers, or
 back it with **SQLite** for durable state that survives restarts — the same
 server scaling from a throwaway CI fixture to lightweight production
 infrastructure. It ships as a single static binary, with no Ruby runtime and no
-external database to operate.
+external database to operate — packaged as a minimal container image, it drops
+cleanly into modern orchestration such as Kubernetes (a persistent volume for the
+SQLite database is all the state it needs).
 
 ## Why cinc-zero
 
