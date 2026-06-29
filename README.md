@@ -42,7 +42,7 @@ Go binary (or a Docker image) with zero Ruby or gem dependencies. Drop it in,
 run it, and point your clients at it; embed it directly in Go tests as a
 library. No bundler, no rbenv, no native extensions.
 
-See [`docs/superpowers/specs`](docs/superpowers/specs) for the full design.
+See [`docs/specs`](docs/specs) for the full design.
 
 ## Use as a Go library
 
