@@ -1,0 +1,40 @@
+package store
+
+// Backend is the pluggable persistence layer beneath Store/Org. It stores opaque
+// canonical-JSON object bodies keyed by (org, collection, key) and opaque blob
+// content keyed by (org, checksum). The empty org string ("") addresses the
+// server-global space (the users/organizations collections), mirroring
+// Store.Global().
+//
+// Object reads and writes operate on any (org, coll, key) regardless of whether
+// CreateOrg was called for that org; CreateOrg/DeleteOrg/ListOrgs/HasOrg track the
+// set of *named* organizations (the global space is never listed). DeleteOrg drops
+// every object and blob belonging to the org. Create and CreateOrg return
+// ErrConflict when the target key or org already exists.
+//
+// A Backend must be safe for concurrent use by multiple goroutines.
+// Implementations live in subpackages (store/memory, store/sqlite).
+type Backend interface {
+	// Object store.
+	Get(org, coll, key string) (val []byte, ok bool, err error)
+	Put(org, coll, key string, val []byte) error
+	Create(org, coll, key string, val []byte) error // ErrConflict if key exists
+	Delete(org, coll, key string) (old []byte, existed bool, err error)
+	Keys(org, coll string) ([]string, error) // sorted
+	Range(org, coll string, fn func(key string, raw []byte) bool) error
+	Collections(org string) ([]string, error) // non-empty collections, sorted
+
+	// Blob store (cookbook file content).
+	PutBlob(org, checksum string, data []byte) error
+	Blob(org, checksum string) (data []byte, ok bool, err error)
+	HasBlob(org, checksum string) (bool, error)
+	DeleteBlob(org, checksum string) error
+
+	// Org lifecycle.
+	CreateOrg(name string) error // ErrConflict if org exists
+	DeleteOrg(name string) (existed bool, err error)
+	ListOrgs() ([]string, error) // named orgs only, sorted
+	HasOrg(name string) (bool, error)
+
+	Close() error
+}
