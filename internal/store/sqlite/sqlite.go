@@ -8,6 +8,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 
 	"github.com/tas50/cinc-zero/internal/store"
 	_ "modernc.org/sqlite"
@@ -23,24 +25,12 @@ type Backend struct {
 	db *sql.DB
 }
 
-// Open opens (creating if needed) a SQLite database at dsn and applies migrations.
-// dsn is a file path; ":memory:" yields an ephemeral database (mainly for tests).
-func Open(dsn string) (*Backend, error) {
-	db, err := sql.Open("sqlite", dsn)
+// Open opens (creating if needed) a SQLite database at path and applies migrations.
+// path is a file path; ":memory:" yields an ephemeral database (mainly for tests).
+func Open(path string) (*Backend, error) {
+	db, err := sql.Open("sqlite", dsnWithPragmas(path))
 	if err != nil {
 		return nil, err
-	}
-	// A single *sql.DB pools connections; SQLite write-serialization plus WAL and
-	// a busy timeout keep concurrent access safe within one process.
-	for _, pragma := range []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA busy_timeout=5000",
-		"PRAGMA foreign_keys=ON",
-	} {
-		if _, err := db.Exec(pragma); err != nil {
-			db.Close()
-			return nil, fmt.Errorf("pragma %q: %w", pragma, err)
-		}
 	}
 	b := &Backend{db: db}
 	if err := b.migrate(); err != nil {
@@ -48,6 +38,24 @@ func Open(dsn string) (*Backend, error) {
 		return nil, err
 	}
 	return b, nil
+}
+
+// dsnWithPragmas appends connection pragmas to path as modernc _pragma query
+// params. Unlike a one-shot db.Exec("PRAGMA ..."), these run on EVERY pooled
+// connection, so busy_timeout actually applies pool-wide — without it concurrent
+// writers get SQLITE_BUSY instead of waiting. WAL allows concurrent readers
+// alongside the single writer; journal_mode is persisted in the file header but
+// set here too so a fresh database starts in WAL immediately.
+func dsnWithPragmas(path string) string {
+	q := url.Values{}
+	q.Add("_pragma", "busy_timeout=5000")
+	q.Add("_pragma", "journal_mode=WAL")
+	q.Add("_pragma", "foreign_keys=1")
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	return path + sep + q.Encode()
 }
 
 // migrate creates the schema if absent and records the schema version. It is

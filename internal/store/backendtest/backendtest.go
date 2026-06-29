@@ -5,6 +5,9 @@ package backendtest
 
 import (
 	"bytes"
+	"fmt"
+	"sort"
+	"sync"
 	"testing"
 
 	"github.com/tas50/cinc-zero/internal/store"
@@ -17,6 +20,7 @@ func Run(t *testing.T, newBackend func(t *testing.T) store.Backend) {
 	t.Run("ObjectRoundTrip", func(t *testing.T) { testObjectRoundTrip(t, newBackend(t)) })
 	t.Run("CopyIndependence", func(t *testing.T) { testCopyIndependence(t, newBackend(t)) })
 	t.Run("CreateConflict", func(t *testing.T) { testCreateConflict(t, newBackend(t)) })
+	t.Run("CreatePreservesOriginal", func(t *testing.T) { testCreatePreservesOriginal(t, newBackend(t)) })
 	t.Run("DeleteSemantics", func(t *testing.T) { testDeleteSemantics(t, newBackend(t)) })
 	t.Run("KeysSorted", func(t *testing.T) { testKeysSorted(t, newBackend(t)) })
 	t.Run("CollectionsSorted", func(t *testing.T) { testCollectionsSorted(t, newBackend(t)) })
@@ -25,6 +29,10 @@ func Run(t *testing.T, newBackend func(t *testing.T) store.Backend) {
 	t.Run("Blobs", func(t *testing.T) { testBlobs(t, newBackend(t)) })
 	t.Run("OrgLifecycle", func(t *testing.T) { testOrgLifecycle(t, newBackend(t)) })
 	t.Run("DeleteOrgDropsData", func(t *testing.T) { testDeleteOrgDropsData(t, newBackend(t)) })
+	t.Run("DeleteOrgIsolation", func(t *testing.T) { testDeleteOrgIsolation(t, newBackend(t)) })
+	t.Run("SortOrderFidelity", func(t *testing.T) { testSortOrderFidelity(t, newBackend(t)) })
+	t.Run("OpaqueBodies", func(t *testing.T) { testOpaqueBodies(t, newBackend(t)) })
+	t.Run("Concurrency", func(t *testing.T) { testConcurrency(t, newBackend(t)) })
 }
 
 func mustPut(t *testing.T, b store.Backend, org, coll, key, val string) {
@@ -207,5 +215,154 @@ func testDeleteOrgDropsData(t *testing.T, b store.Backend) {
 	}
 	if ok, _ := b.HasBlob("acme", "cafe"); ok {
 		t.Fatal("blob survived DeleteOrg")
+	}
+}
+
+// testCreatePreservesOriginal asserts a conflicting Create does not overwrite the
+// existing value (Create is not an upsert).
+func testCreatePreservesOriginal(t *testing.T, b store.Backend) {
+	if err := b.Create("acme", "roles", "base", []byte(`{"v":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Create("acme", "roles", "base", []byte(`{"v":2}`)); err != store.ErrConflict {
+		t.Fatalf("want ErrConflict, got %v", err)
+	}
+	got, _, _ := b.Get("acme", "roles", "base")
+	if string(got) != `{"v":1}` {
+		t.Fatalf("conflicting Create overwrote value: %q", got)
+	}
+}
+
+// testDeleteOrgIsolation asserts DeleteOrg drops only the named org's data and
+// leaves other orgs (and the global space) untouched.
+func testDeleteOrgIsolation(t *testing.T, b store.Backend) {
+	for _, org := range []string{"acme", "beta"} {
+		if err := b.CreateOrg(org); err != nil {
+			t.Fatal(err)
+		}
+		mustPut(t, b, org, "nodes", "web", `{}`)
+	}
+	mustPut(t, b, "", "users", "pivotal", `{}`) // global space
+	if _, err := b.DeleteOrg("acme"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := b.Get("beta", "nodes", "web"); !ok {
+		t.Fatal("DeleteOrg(acme) dropped beta's data")
+	}
+	if _, ok, _ := b.Get("", "users", "pivotal"); !ok {
+		t.Fatal("DeleteOrg(acme) dropped the global space")
+	}
+}
+
+// testSortOrderFidelity asserts Keys/Collections/ListOrgs return byte-ascending
+// order (Go sort.Strings), not a case-insensitive or locale collation. This guards
+// the documented risk that a SQL backend's ORDER BY collation diverges from the
+// memory backend's sort.Strings for mixed-case/unicode keys.
+func testSortOrderFidelity(t *testing.T, b store.Backend) {
+	keys := []string{"Zebra", "apple", "Banana", "10", "2", "apple2", "_under", "Ähen"}
+	for _, k := range keys {
+		mustPut(t, b, "acme", "nodes", k, `{}`)
+	}
+	want := append([]string(nil), keys...)
+	sort.Strings(want)
+	got, err := b.Keys("acme", "nodes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("Keys order diverges from sort.Strings:\n got=%v\nwant=%v", got, want)
+	}
+
+	colls := []string{"Roles", "nodes", "Environments", "data_bags"}
+	for _, c := range colls {
+		mustPut(t, b, "beta", c, "x", `{}`)
+	}
+	wantColls := append([]string(nil), colls...)
+	sort.Strings(wantColls)
+	gotColls, err := b.Collections("beta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(gotColls) != fmt.Sprint(wantColls) {
+		t.Fatalf("Collections order diverges:\n got=%v\nwant=%v", gotColls, wantColls)
+	}
+
+	orgNames := []string{"Zorg", "acme", "Beta"}
+	for _, o := range orgNames {
+		if err := b.CreateOrg(o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wantOrgs := append([]string(nil), orgNames...)
+	sort.Strings(wantOrgs)
+	gotOrgs, err := b.ListOrgs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(gotOrgs) != fmt.Sprint(wantOrgs) {
+		t.Fatalf("ListOrgs order diverges:\n got=%v\nwant=%v", gotOrgs, wantOrgs)
+	}
+}
+
+// testOpaqueBodies asserts the backend stores bodies as opaque bytes: arbitrary
+// binary content (embedded NUL, non-UTF-8) round-trips exactly, for both objects
+// and blobs.
+func testOpaqueBodies(t *testing.T, b store.Backend) {
+	body := []byte{'{', 0x00, 0xff, 0xfe, 'a', '}'}
+	if err := b.Put("acme", "nodes", "bin", body); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := b.Get("acme", "nodes", "bin")
+	if err != nil || !ok || !bytes.Equal(got, body) {
+		t.Fatalf("object body not preserved: got=%v ok=%v err=%v", got, ok, err)
+	}
+	if err := b.PutBlob("acme", "bincs", body); err != nil {
+		t.Fatal(err)
+	}
+	gotBlob, ok, err := b.Blob("acme", "bincs")
+	if err != nil || !ok || !bytes.Equal(gotBlob, body) {
+		t.Fatalf("blob content not preserved: got=%v ok=%v err=%v", gotBlob, ok, err)
+	}
+}
+
+// testConcurrency hammers the backend from many goroutines to surface data races
+// (under -race) and, for SQL backends, write-lock contention. Each worker owns a
+// disjoint key range, and concurrent Range scans run alongside the writers.
+func testConcurrency(t *testing.T, b store.Backend) {
+	const workers, ops = 8, 25
+	var wg sync.WaitGroup
+	for w := range workers {
+		wg.Go(func() {
+			for i := range ops {
+				key := fmt.Sprintf("w%d-k%d", w, i)
+				if err := b.Put("acme", "nodes", key, []byte(`{}`)); err != nil {
+					t.Errorf("concurrent Put: %v", err)
+					return
+				}
+				if _, ok, err := b.Get("acme", "nodes", key); err != nil || !ok {
+					t.Errorf("concurrent Get: ok=%v err=%v", ok, err)
+					return
+				}
+			}
+		})
+	}
+	// Concurrent readers scanning while writes are in flight.
+	for range 2 {
+		wg.Go(func() {
+			for range ops {
+				if err := b.Range("acme", "nodes", func(string, []byte) bool { return true }); err != nil {
+					t.Errorf("concurrent Range: %v", err)
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
+	keys, err := b.Keys("acme", "nodes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != workers*ops {
+		t.Fatalf("lost writes under concurrency: got %d keys, want %d", len(keys), workers*ops)
 	}
 }
