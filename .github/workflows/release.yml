@@ -1,0 +1,73 @@
+name: release
+
+# Publish a multi-arch container image when a GitHub Release is published.
+# The image goes to GHCR under the repository owner: ghcr.io/<owner>/cinc-zero.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  packages: write # push the image to GHCR with GITHUB_TOKEN
+  id-token: write # OIDC token for keyless Sigstore signing of the provenance
+  attestations: write # record the signed attestation in GitHub's store
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # QEMU + buildx give us the cross-build (arm64) and OCI features.
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The Go Dockerfile stamps version metadata in via build args.
+      - name: Capture build date
+        run: echo "BUILD_DATE=$(date -u +%Y-%m-%d)" >> "$GITHUB_ENV"
+
+      # Derive image tags from the release: the semver (e.g. 0.2.0), the major.minor
+      # (0.2), and latest. The leading "v" on the git tag is stripped automatically.
+      - id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/cinc-zero
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.event.release.tag_name }}
+            COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ env.BUILD_DATE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # BuildKit attestations attached to the image index: a full provenance
+          # record (mode=max) and an SPDX SBOM, inspectable with
+          # `docker buildx imagetools inspect --format '{{json .SBOM}}' <ref>`.
+          provenance: mode=max
+          sbom: true
+
+      # A second, Sigstore-signed SLSA provenance attestation recorded in GitHub's
+      # transparency log and pushed alongside the image. Verify with:
+      #   gh attestation verify oci://ghcr.io/<owner>/cinc-zero:<tag> --owner <owner>
+      - uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45 # v2
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/cinc-zero
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
