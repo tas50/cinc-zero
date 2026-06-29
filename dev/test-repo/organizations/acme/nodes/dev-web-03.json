@@ -29,16 +29,821 @@
     "kernel": {
       "name": "Linux",
       "release": "5.14.0-362.8.1.el9_3.x86_64",
+      "version": "#1 SMP PREEMPT_DYNAMIC Tue Oct 3 11:12:36 EDT 2023",
       "machine": "x86_64",
-      "os": "GNU/Linux"
+      "processor": "x86_64",
+      "os": "GNU/Linux",
+      "modules": {
+        "tls": {
+          "size": "151552",
+          "refcount": "0"
+        },
+        "rfkill": {
+          "size": "40960",
+          "refcount": "1"
+        },
+        "vfat": {
+          "size": "20480",
+          "refcount": "1"
+        },
+        "fat": {
+          "size": "102400",
+          "refcount": "1"
+        },
+        "intel_rapl_msr": {
+          "size": "20480",
+          "refcount": "0"
+        },
+        "cirrus": {
+          "size": "16384",
+          "refcount": "0"
+        },
+        "intel_rapl_common": {
+          "size": "36864",
+          "refcount": "1"
+        },
+        "drm_shmem_helper": {
+          "size": "28672",
+          "refcount": "1"
+        },
+        "rapl": {
+          "size": "28672",
+          "refcount": "0"
+        },
+        "drm_kms_helper": {
+          "size": "245760",
+          "refcount": "3"
+        },
+        "syscopyarea": {
+          "size": "16384",
+          "refcount": "1"
+        },
+        "sysfillrect": {
+          "size": "16384",
+          "refcount": "1"
+        },
+        "pcspkr": {
+          "size": "16384",
+          "refcount": "0"
+        },
+        "sysimgblt": {
+          "size": "16384",
+          "refcount": "1"
+        },
+        "i2c_piix4": {
+          "size": "32768",
+          "refcount": "0"
+        },
+        "fuse": {
+          "size": "212992",
+          "refcount": "1"
+        },
+        "drm": {
+          "size": "704512",
+          "refcount": "4"
+        },
+        "xfs": {
+          "size": "2473984",
+          "refcount": "2"
+        },
+        "libcrc32c": {
+          "size": "16384",
+          "refcount": "1"
+        },
+        "ata_generic": {
+          "size": "16384",
+          "refcount": "0",
+          "version": "0.2.15"
+        },
+        "crct10dif_pclmul": {
+          "size": "16384",
+          "refcount": "1"
+        },
+        "crc32_pclmul": {
+          "size": "16384",
+          "refcount": "0"
+        },
+        "ata_piix": {
+          "size": "45056",
+          "refcount": "0",
+          "version": "2.13"
+        },
+        "crc32c_intel": {
+          "size": "24576",
+          "refcount": "1"
+        },
+        "libata": {
+          "size": "479232",
+          "refcount": "2",
+          "version": "3.00"
+        },
+        "xen_netfront": {
+          "size": "49152",
+          "refcount": "1"
+        },
+        "xen_blkfront": {
+          "size": "57344",
+          "refcount": "4"
+        },
+        "ghash_clmulni_intel": {
+          "size": "16384",
+          "refcount": "0"
+        },
+        "serio_raw": {
+          "size": "20480",
+          "refcount": "0"
+        },
+        "dm_mirror": {
+          "size": "32768",
+          "refcount": "0"
+        },
+        "dm_region_hash": {
+          "size": "28672",
+          "refcount": "1"
+        },
+        "dm_log": {
+          "size": "28672",
+          "refcount": "2"
+        },
+        "dm_mod": {
+          "size": "237568",
+          "refcount": "2"
+        }
+      }
     },
+    "lsb": {},
+    "init_package": "systemd",
     "cpu": {
-      "total": 8,
-      "model_name": "Intel(R) Xeon(R) CPU"
+      "real": 1,
+      "total": 1,
+      "cores": 1
     },
     "memory": {
-      "total": "2097152kB"
+      "total": "1048576kB"
     },
+    "dmi": {
+      "dmidecode_version": "3.5",
+      "smbios_version": "2.7",
+      "structures": {
+        "count": "12",
+        "size": "426"
+      },
+      "bios": {
+        "all_records": [
+          {
+            "record_id": "0x0000",
+            "size": "0",
+            "application_identifier": "BIOS Information",
+            "Vendor": "Xen",
+            "Version": "4.11.amazon",
+            "Release Date": "08/24/2006",
+            "Address": "0xE8000",
+            "Runtime Size": "96 kB",
+            "ROM Size": "64 kB",
+            "Characteristics": {
+              "Targeted content distribution is supported": null
+            },
+            "BIOS Revision": "4.11"
+          }
+        ],
+        "vendor": "Xen",
+        "version": "4.11.amazon",
+        "release_date": "08/24/2006",
+        "address": "0xE8000",
+        "runtime_size": "96 kB",
+        "rom_size": "64 kB",
+        "bios_revision": "4.11"
+      },
+      "system": {
+        "all_records": [
+          {
+            "record_id": "0x0100",
+            "size": "1",
+            "application_identifier": "System Information",
+            "Manufacturer": "Xen",
+            "Product Name": "HVM domU",
+            "Version": "4.11.amazon",
+            "Serial Number": "ec2c333a-7944-691f-056f-b6ea5cbfce80",
+            "UUID": "ec2c333a-7944-691f-056f-b6ea5cbfce80",
+            "Wake-up Type": "Power Switch",
+            "SKU Number": "Not Specified",
+            "Family": "Not Specified"
+          }
+        ],
+        "manufacturer": "Xen",
+        "product_name": "HVM domU",
+        "version": "4.11.amazon",
+        "serial_number": "ec2c333a-7944-691f-056f-b6ea5cbfce80",
+        "uuid": "ec2c333a-7944-691f-056f-b6ea5cbfce80",
+        "wake_up_type": "Power Switch",
+        "sku_number": "Not Specified",
+        "family": "Not Specified"
+      },
+      "chassis": {
+        "all_records": [
+          {
+            "record_id": "0x0300",
+            "size": "3",
+            "application_identifier": "Chassis Information",
+            "Manufacturer": "Xen",
+            "Type": "Other",
+            "Lock": "Not Present",
+            "Version": "Not Specified",
+            "Serial Number": "Not Specified",
+            "Asset Tag": "Not Specified",
+            "Boot-up State": "Safe",
+            "Power Supply State": "Safe",
+            "Thermal State": "Safe",
+            "Security Status": "Unknown",
+            "OEM Information": "0x00000000",
+            "Height": "Unspecified",
+            "Number Of Power Cords": "Unspecified",
+            "Contained Elements": "0"
+          }
+        ],
+        "manufacturer": "Xen",
+        "type": "Other",
+        "lock": "Not Present",
+        "version": "Not Specified",
+        "serial_number": "Not Specified",
+        "asset_tag": "Not Specified",
+        "boot_up_state": "Safe",
+        "power_supply_state": "Safe",
+        "thermal_state": "Safe",
+        "security_status": "Unknown",
+        "oem_information": "0x00000000",
+        "height": "Unspecified",
+        "number_of_power_cords": "Unspecified",
+        "contained_elements": "0"
+      },
+      "processor": {
+        "all_records": [
+          {
+            "record_id": "0x0401",
+            "size": "4",
+            "application_identifier": "Processor Information",
+            "Socket Designation": "CPU 1",
+            "Type": "Central Processor",
+            "Family": "Other",
+            "Manufacturer": "Intel",
+            "ID": "F1 06 04 00 FF FB 8B 17",
+            "Version": "Not Specified",
+            "Voltage": "Unknown",
+            "External Clock": "Unknown",
+            "Max Speed": "2300 MHz",
+            "Current Speed": "2300 MHz",
+            "Status": "Populated, Enabled",
+            "Upgrade": "Other",
+            "L1 Cache Handle": "Not Provided",
+            "L2 Cache Handle": "Not Provided",
+            "L3 Cache Handle": "Not Provided",
+            "Serial Number": "Not Specified",
+            "Asset Tag": "Not Specified",
+            "Part Number": "Not Specified"
+          },
+          {
+            "record_id": "0x0402",
+            "size": "4",
+            "application_identifier": "Processor Information",
+            "Socket Designation": "CPU 2",
+            "Type": "Central Processor",
+            "Family": "Other",
+            "Manufacturer": "Intel",
+            "ID": "F1 06 04 00 FF FB 8B 17",
+            "Version": "Not Specified",
+            "Voltage": "Unknown",
+            "External Clock": "Unknown",
+            "Max Speed": "2300 MHz",
+            "Current Speed": "2300 MHz",
+            "Status": "Populated, Enabled",
+            "Upgrade": "Other",
+            "L1 Cache Handle": "Not Provided",
+            "L2 Cache Handle": "Not Provided",
+            "L3 Cache Handle": "Not Provided",
+            "Serial Number": "Not Specified",
+            "Asset Tag": "Not Specified",
+            "Part Number": "Not Specified"
+          }
+        ],
+        "type": "Central Processor",
+        "family": "Other",
+        "manufacturer": "Intel",
+        "id": "F1 06 04 00 FF FB 8B 17",
+        "version": "Not Specified",
+        "voltage": "Unknown",
+        "external_clock": "Unknown",
+        "max_speed": "2300 MHz",
+        "current_speed": "2300 MHz",
+        "status": "Populated, Enabled",
+        "upgrade": "Other",
+        "l1_cache_handle": "Not Provided",
+        "l2_cache_handle": "Not Provided",
+        "l3_cache_handle": "Not Provided",
+        "serial_number": "Not Specified",
+        "asset_tag": "Not Specified",
+        "part_number": "Not Specified"
+      },
+      "oem_strings": {
+        "all_records": [
+          {
+            "record_id": "0x0B00",
+            "size": "11",
+            "application_identifier": "OEM Strings",
+            "String 1": "Xen"
+          }
+        ],
+        "string_1": "Xen"
+      }
+    },
+    "block_device": {
+      "xvda": {
+        "size": "33554432",
+        "removable": "0",
+        "state": "Connected",
+        "rotational": "0",
+        "physical_block_size": "512",
+        "logical_block_size": "512"
+      }
+    },
+    "filesystem": {
+      "by_device": {
+        "devtmpfs": {
+          "kb_size": "4096",
+          "kb_used": "0",
+          "kb_available": "4096",
+          "percent_used": "0%",
+          "total_inodes": "456617",
+          "inodes_used": "305",
+          "inodes_available": "456312",
+          "inodes_percent_used": "1%",
+          "fs_type": "devtmpfs",
+          "mount_options": [
+            "rw",
+            "nosuid",
+            "seclabel",
+            "size=4096k",
+            "nr_inodes=456617",
+            "mode=755",
+            "inode64"
+          ],
+          "mounts": [
+            "/dev"
+          ]
+        },
+        "tmpfs": {
+          "kb_size": "373224",
+          "kb_used": "0",
+          "kb_available": "373224",
+          "percent_used": "0%",
+          "total_inodes": "93306",
+          "inodes_used": "14",
+          "inodes_available": "93292",
+          "inodes_percent_used": "1%",
+          "fs_type": "tmpfs",
+          "mount_options": [
+            "rw",
+            "nosuid",
+            "nodev",
+            "relatime",
+            "seclabel",
+            "size=373224k",
+            "nr_inodes=93306",
+            "mode=700",
+            "uid=1000",
+            "gid=1000",
+            "inode64"
+          ],
+          "mounts": [
+            "/dev/shm",
+            "/run",
+            "/run/user/1000"
+          ]
+        },
+        "/dev/xvda4": {
+          "kb_size": "15890412",
+          "kb_used": "1630072",
+          "kb_available": "14260340",
+          "percent_used": "11%",
+          "total_inodes": "7977968",
+          "inodes_used": "46240",
+          "inodes_available": "7931728",
+          "inodes_percent_used": "1%",
+          "fs_type": "xfs",
+          "mount_options": [
+            "rw",
+            "relatime",
+            "seclabel",
+            "attr2",
+            "inode64",
+            "logbufs=8",
+            "logbsize=32k",
+            "noquota"
+          ],
+          "uuid": "2cfdcca4-d3e3-40cb-b58e-0bed76bdceec",
+          "label": "root",
+          "mounts": [
+            "/"
+          ]
+        },
+        "/dev/xvda3": {
+          "kb_size": "548864",
+          "kb_used": "164608",
+          "kb_available": "384256",
+          "percent_used": "30%",
+          "total_inodes": "307200",
+          "inodes_used": "307",
+          "inodes_available": "306893",
+          "inodes_percent_used": "1%",
+          "fs_type": "xfs",
+          "mount_options": [
+            "rw",
+            "relatime",
+            "seclabel",
+            "attr2",
+            "inode64",
+            "logbufs=8",
+            "logbsize=32k",
+            "noquota"
+          ],
+          "uuid": "1dde521c-d910-4d8f-a14a-2704a5d4dbd4",
+          "label": "boot",
+          "mounts": [
+            "/boot"
+          ]
+        },
+        "/dev/xvda2": {
+          "kb_size": "204580",
+          "kb_used": "7128",
+          "kb_available": "197452",
+          "percent_used": "4%",
+          "fs_type": "vfat",
+          "mount_options": [
+            "rw",
+            "relatime",
+            "fmask=0077",
+            "dmask=0077",
+            "codepage=437",
+            "iocharset=ascii",
+            "shortname=winnt",
+            "errors=remount-ro"
+          ],
+          "uuid": "7B77-95E7",
+          "mounts": [
+            "/efi",
+            "/boot/efi"
+          ]
+        },
+        "proc": {
+          "fs_type": "proc",
+          "mount_options": [
+            "rw",
+            "nosuid",
+            "nodev",
+            "noexec",
+            "relatime"
+          ],
+          "mounts": [
+            "/proc"
+          ]
+        },
+        "sysfs": {
+          "fs_type": "sysfs",
+          "mount_options": [
+            "rw",
+            "nosuid",
+            "nodev",
+            "noexec",
+            "relatime",
+            "seclabel"
+          ],
+          "mounts": [
+            "/sys"
+          ]
+        },
+        "securityfs": {
+          "fs_type": "securityfs",
+          "mount_options": [
+            "rw",
+            "nosuid",
+            "nodev",
+            "noexec",
+            "relatime"
+          ],
+          "mounts": [
+            "/sys/kernel/security"
+          ]
+        },
+        "devpts": {
+          "fs_type": "devpts",
+          "mount_options": [
+            "rw",
+            "nosuid",
+            "noexec",
+            "relatime",
+            "seclabel",
+            "gid=5",
+            "mode=620",
+            "ptmxmode=000"
+          ],
+          "mounts": [
+            "/dev/pts"
+          ]
+        },
+        "cgroup2": {
+          "fs_type": "cgroup2",
+          "mount_options": [
+            "rw",
+            "nosuid",
+            "nodev",
+            "noexec",
+            "relatime",
+            "seclabel",
+            "nsdelegate",
+            "memory_recursiveprot"
+          ],
+          "mounts": [
+            "/sys/fs/cgroup"
+          ]
+        },
+        "pstore": {
+          "fs_type": "pstore",
+          "mount_options": [
+            "rw",
+            "nosuid",
+            "nodev",
+            "noexec",
+            "relatime",
+            "seclabel"
+          ],
+          "mounts": [
+            "/sys/fs/pstore"
+          ]
+        },
+        "bpf": {
+          "fs_type": "bpf",
+          "mount_options": [
+            "rw",
+            "nosuid",
+            "nodev",
+            "noexec",
+            "relatime",
+            "mode=700"
+          ],
+          "mounts": [
+            "/sys/fs/bpf"
+          ]
+        },
+        "selinuxfs": {
+          "fs_type": "selinuxfs",
+          "mount_options": [
+            "rw",
+            "nosuid",
+            "noexec",
+            "relatime"
+          ],
+          "mounts": [
+            "/sys/fs/selinux"
+          ]
+        },
+        "systemd-1": {
+          "fs_type": "autofs",
+          "mount_options": [
+            "rw",
+            "relatime",
+            "fd=37",
+            "pgrp=1",
+            "timeout=120",
+            "minproto=5",
+            "maxproto=5",
+            "direct",
+            "pipe_ino=14915"
+          ],
+          "mounts": [
+            "/proc/sys/fs/binfmt_misc",
+            "/efi"
+          ]
+        },
+        "hugetlbfs": {
+          "fs_type": "hugetlbfs",
+          "mount_options": [
+            "rw",
+            "relatime",
+            "seclabel",
+            "pagesize=2M"
+          ],
+          "mounts": [
+            "/dev/hugepages"
+          ]
+        },
+        "mqueue": {
+          "fs_type": "mqueue",
+          "mount_options": [
+            "rw",
+            "nosuid",
+            "nodev",
+            "noexec",
+            "relatime",
+            "seclabel"
+          ],
+          "mounts": [
+            "/dev/mqueue"
+          ]
+        },
+        "debugfs": {
+          "fs_type": "debugfs",
+          "mount_options": [
+            "rw",
+            "nosuid",
+            "nodev",
+            "noexec",
+            "relatime",
+            "seclabel"
+          ],
+          "mounts": [
+            "/sys/kernel/debug"
+          ]
+        },
+        "tracefs": {
+          "fs_type": "tracefs",
+          "mount_options": [
+            "rw",
+            "nosuid",
+            "nodev",
+            "noexec",
+            "relatime",
+            "seclabel"
+          ],
+          "mounts": [
+            "/sys/kernel/tracing"
+          ]
+        },
+        "fusectl": {
+          "fs_type": "fusectl",
+          "mount_options": [
+            "rw",
+            "nosuid",
+            "nodev",
+            "noexec",
+            "relatime"
+          ],
+          "mounts": [
+            "/sys/fs/fuse/connections"
+          ]
+        },
+        "configfs": {
+          "fs_type": "configfs",
+          "mount_options": [
+            "rw",
+            "nosuid",
+            "nodev",
+            "noexec",
+            "relatime"
+          ],
+          "mounts": [
+            "/sys/kernel/config"
+          ]
+        },
+        "none": {
+          "fs_type": "ramfs",
+          "mount_options": [
+            "ro",
+            "nosuid",
+            "nodev",
+            "noexec",
+            "relatime",
+            "seclabel",
+            "mode=700"
+          ],
+          "mounts": [
+            "/run/credentials/systemd-sysctl.service",
+            "/run/credentials/systemd-sysusers.service",
+            "/run/credentials/systemd-tmpfiles-setup-dev.service",
+            "/run/credentials/systemd-tmpfiles-setup.service"
+          ]
+        },
+        "/dev/xvda": {
+          "mounts": []
+        },
+        "/dev/xvda1": {
+          "mounts": []
+        }
+      }
+    },
+    "network": {
+      "interfaces": {
+        "lo": {
+          "mtu": "65536",
+          "flags": [
+            "LOOPBACK",
+            "UP",
+            "LOWER_UP"
+          ],
+          "encapsulation": "Loopback",
+          "addresses": {
+            "127.0.0.1": {
+              "family": "inet",
+              "prefixlen": "8",
+              "netmask": "255.0.0.0",
+              "scope": "Node",
+              "ip_scope": "LOOPBACK"
+            },
+            "::1": {
+              "family": "inet6",
+              "prefixlen": "128",
+              "scope": "Node",
+              "tags": [],
+              "ip_scope": "LINK LOCAL LOOPBACK"
+            }
+          },
+          "state": "unknown"
+        },
+        "eth0": {
+          "type": "eth",
+          "number": "0",
+          "mtu": "1500",
+          "flags": [
+            "BROADCAST",
+            "MULTICAST",
+            "UP",
+            "LOWER_UP"
+          ],
+          "encapsulation": "Ethernet",
+          "addresses": {
+            "52:54:00:00:00:63": {
+              "family": "lladdr"
+            },
+            "10.0.1.52": {
+              "family": "inet",
+              "prefixlen": "24",
+              "netmask": "255.255.255.0",
+              "broadcast": "10.0.0.255",
+              "scope": "Global",
+              "ip_scope": "RFC1918 PRIVATE"
+            },
+            "fe80::11:1111:1111:1111": {
+              "family": "inet6",
+              "prefixlen": "64",
+              "scope": "Link",
+              "tags": [],
+              "ip_scope": "LINK LOCAL UNICAST"
+            }
+          },
+          "state": "up",
+          "arp": {
+            "10.0.0.1": "fe:ff:ff:ff:ff:ff"
+          },
+          "routes": [
+            {
+              "destination": "default",
+              "family": "inet",
+              "via": "10.0.0.1"
+            },
+            {
+              "destination": "10.0.0.0/24",
+              "family": "inet",
+              "scope": "link",
+              "proto": "kernel",
+              "src": "10.0.1.52"
+            },
+            {
+              "destination": "fe80::/64",
+              "family": "inet6",
+              "metric": "256",
+              "proto": "kernel"
+            }
+          ],
+          "ring_params": {}
+        }
+      },
+      "default_interface": "eth0",
+      "default_gateway": "10.0.0.1"
+    },
+    "languages": {
+      "ruby": {
+        "platform": "x86_64-linux",
+        "version": "3.0.3",
+        "release_date": "2021-11-24",
+        "target": "x86_64-pc-linux-gnu",
+        "target_cpu": "x86_64",
+        "target_vendor": "pc",
+        "target_os": "linux",
+        "host": "x86_64-pc-linux-gnu",
+        "host_cpu": "x86_64",
+        "host_os": "linux",
+        "host_vendor": "pc",
+        "bin_dir": "/usr/local/bin",
+        "ruby_bin": "/usr/local/bin/ruby",
+        "gem_bin": "/usr/local/bin/gem",
+        "gems_dir": "/usr/local/gems"
+      },
+      "powershell": null
+    },
+    "shells": [
+      "/bin/sh",
+      "/bin/bash",
+      "/usr/bin/sh",
+      "/usr/bin/bash"
+    ],
     "virtualization": {
       "system": "kvm",
       "role": "guest"
@@ -49,6 +854,7 @@
       }
     },
     "ohai_time": 1782625887.0,
-    "uptime_seconds": 401000
+    "uptime_seconds": 401000,
+    "uptime": "4 days 15 hours 23 minutes 20 seconds"
   }
 }

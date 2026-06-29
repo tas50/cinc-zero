@@ -76,11 +76,17 @@ else      -> "%d seconds"
 **Taken from fauxhai (the realism):** `cpu`, `memory`, `dmi`, `filesystem`,
 `block_device`, `network`, the rest of `kernel` (`name`, `version`, `modules`,
 `processor`, `os`), `lsb`, `init_package`, `os`, `platform`, `platform_family`,
-`languages`, `shells`.
+`languages`, `shells`. `dmi` and `block_device` are platform-dependent —
+fauxhai ships an empty `dmi` for debian/12, rocky/9, and almalinux/9, and no
+`block_device` for windows — so they appear wherever fauxhai provides them
+rather than on every node.
 
 **Dropped (bulky / volatile, not needed for fixtures):** `packages`, `keys`,
 `counters`, `command`, `shard_seed`, `time`, `current_user`, `idle`,
-`idletime_seconds`, `fips`.
+`idletime_seconds`, `fips`. fauxhai's `filesystem` also triplicates the same
+mounts across `by_device`, `by_mountpoint`, and `by_pair` (~24KB); only the
+canonical `by_device` view is kept, landing nodes at ~24KB each instead of the
+~70KB full dump.
 
 **Identity consistency:** fauxhai keys network/dmi data by its placeholder
 `10.0.0.2` / `11:11:11:11:11:11`. After overlay, token-replace those throughout
@@ -100,11 +106,10 @@ deterministic, invents no numbers; the realism is carried by structure.
      string equal to `ohaiUptime(uptime_seconds)`, where `ohaiUptime` is a small
      helper in the test mirroring the formatter above.
    - `TestSeedNodesHaveRichOhai` — every node's `automatic` carries non-empty
-     `dmi`, `filesystem`, and `network`; and the node's `ipaddress` and
-     `macaddress` each appear within the serialized `network` block (proving the
-     identity overlay propagated). Assertions are chosen to hold for every
-     platform including windows (which has `dmi`/`filesystem`/`network` but no
-     `block_device`).
+     `filesystem` and `network` (the signals every fauxhai platform ships;
+     `dmi`/`block_device` are platform-dependent, so they are not asserted
+     per-node); and the node's `ipaddress` and `macaddress` each appear within
+     the serialized `network` block (proving the identity overlay propagated).
    - All existing seed tests must stay green.
 2. **Generator** — a throwaway script in the session scratchpad (NOT committed;
    no fauxhai-source path leaks into the repo) reads a local fauxhai checkout and
