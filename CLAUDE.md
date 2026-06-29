@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-cinc-zero is a fully in-memory Chef Infra Server in Go for test pipelines. It speaks the real Chef Infra Server API and authenticates unmodified `chef-client`/`knife`/`cinc` clients via genuine Mixlib::Authentication signed requests, keeping all state in memory. Fidelity to real Chef Infra Server behavior is the goal; Policyfiles/policy groups are first-class.
+cinc-zero is a lightweight, drop-in alternative Chef Infra Server in Go. It speaks the real Chef Infra Server API and authenticates unmodified `chef-client`/`knife`/`cinc` clients via genuine Mixlib::Authentication signed requests. State lives behind a pluggable `store.Backend`: in memory by default (instant, disposable test servers) or in SQLite for durable state that survives restarts (`--storage sqlite --db <path>`), so the same server spans CI fixtures and lightweight production. Fidelity to real Chef Infra Server behavior is the goal; Policyfiles/policy groups are first-class.
 
 ## Commands
 

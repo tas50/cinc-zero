@@ -1,11 +1,15 @@
 # cinc-zero
 
-A fully in-memory [Chef Infra Server](https://docs.chef.io/server/) implemented
-in Go, for use in test pipelines. It speaks the real Chef Infra Server API and
-authenticates real `chef-client` / `knife` / `cinc` clients using genuine
+A lightweight, drop-in alternative to
+[Chef Infra Server](https://docs.chef.io/server/), implemented in Go. It speaks
+the real Chef Infra Server API and authenticates unmodified `chef-client` /
+`knife` / `cinc` clients using genuine
 [Mixlib::Authentication](https://github.com/chef/mixlib-authentication) signed
-requests, but keeps everything in memory, so it starts instantly and leaves
-nothing behind.
+requests. Run it fully **in memory** for instant, disposable test servers, or
+back it with **SQLite** for durable state that survives restarts — the same
+server scaling from a throwaway CI fixture to lightweight production
+infrastructure. It ships as a single static binary, with no Ruby runtime and no
+external database to operate.
 
 ## Why cinc-zero
 
