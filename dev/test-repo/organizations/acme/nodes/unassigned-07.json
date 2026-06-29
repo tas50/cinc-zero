@@ -1,26 +1,23 @@
 {
-  "name": "staging-app-02",
+  "name": "unassigned-07",
   "chef_type": "node",
   "json_class": "Chef::Node",
   "default": {},
   "override": {},
-  "chef_environment": "staging",
-  "run_list": [
-    "role[base]",
-    "role[app]"
-  ],
+  "chef_environment": "_default",
+  "run_list": [],
   "normal": {
     "tags": [
-      "staging-app-02"
+      "unassigned-07"
     ]
   },
   "automatic": {
-    "fqdn": "staging-app-02.acme.example.com",
-    "hostname": "staging-app-02",
-    "machinename": "staging-app-02",
+    "fqdn": "unassigned-07.acme.example.com",
+    "hostname": "unassigned-07",
+    "machinename": "unassigned-07",
     "domain": "acme.example.com",
-    "ipaddress": "10.0.1.40",
-    "macaddress": "52:54:00:00:00:57",
+    "ipaddress": "10.0.1.82",
+    "macaddress": "52:54:00:00:00:81",
     "platform": "suse",
     "platform_family": "suse",
     "platform_version": "15.2",
@@ -33,11 +30,11 @@
       "os": "GNU/Linux"
     },
     "cpu": {
-      "total": 8,
+      "total": 2,
       "model_name": "Intel(R) Xeon(R) CPU"
     },
     "memory": {
-      "total": "16777216kB"
+      "total": "1048576kB"
     },
     "virtualization": {
       "system": "kvm",
@@ -48,7 +45,7 @@
         "version": "19.3.14"
       }
     },
-    "ohai_time": 1782624830.0,
-    "uptime_seconds": 389000
+    "ohai_time": 1782625301.0,
+    "uptime_seconds": 1440
   }
 }

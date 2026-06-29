@@ -39,7 +39,7 @@ func TestSeedCounts(t *testing.T) {
 	}
 	acme := sum.Orgs["acme"]
 	for coll, want := range map[string]int{
-		"nodes":            99,
+		"nodes":            107,
 		"roles":            8,
 		"environments":     3,
 		"cookbooks":        8,
@@ -248,5 +248,135 @@ func TestSeedNoDanglingReferences(t *testing.T) {
 				t.Errorf("node %s policy %q revision %q not loaded", name, node.PolicyName, pin.RevisionID)
 			}
 		}
+	}
+}
+
+// currentClientVersion is the cinc-client / chef-client version the bulk of the
+// fleet has converged onto; a minority of nodes lag on older releases (see
+// TestSeedChefClientVersions) so the fixture exercises version-drift scenarios.
+const currentClientVersion = "19.3.14"
+
+// nodeAutomatic decodes the slice of a node's automatic attributes the
+// version/check-in tests care about.
+type nodeAutomatic struct {
+	Automatic struct {
+		OhaiTime     float64 `json:"ohai_time"`
+		ChefPackages struct {
+			Chef struct {
+				Version string `json:"version"`
+			} `json:"chef"`
+		} `json:"chef_packages"`
+	} `json:"automatic"`
+}
+
+// TestSeedChefClientVersions verifies the fleet models realistic version drift:
+// the great majority of nodes run the current cinc-client (19.3.14) while a
+// ~10% minority lag on a spread of older, differing releases.
+func TestSeedChefClientVersions(t *testing.T) {
+	_, org, _ := loadSeed(t)
+
+	names := org.Keys("nodes")
+	total := len(names)
+	current := 0
+	old := map[string]int{}
+	for _, name := range names {
+		raw, _ := org.Get("nodes", name)
+		var node nodeAutomatic
+		if err := json.Unmarshal(raw, &node); err != nil {
+			t.Fatalf("node %s: %v", name, err)
+		}
+		v := node.Automatic.ChefPackages.Chef.Version
+		if v == "" {
+			t.Errorf("node %s reports no chef_packages.chef.version", name)
+			continue
+		}
+		if v == currentClientVersion {
+			current++
+		} else {
+			old[v]++
+		}
+	}
+
+	oldCount := total - current
+	// Most of the fleet is current.
+	if current < total*8/10 {
+		t.Errorf("only %d/%d nodes on current %s, want the majority (>=80%%)", current, total, currentClientVersion)
+	}
+	// A ~10% minority lags behind — enough to be meaningful, not a flood.
+	if oldCount < 8 || oldCount > total/5 {
+		t.Errorf("%d nodes on old versions, want a ~10%% minority (8..%d)", oldCount, total/5)
+	}
+	// Those stragglers run a *spread* of different old releases, not one.
+	if len(old) < 5 {
+		t.Errorf("old nodes run %d distinct versions %v, want a varied spread (>=5)", len(old), old)
+	}
+}
+
+// TestSeedBareNodes verifies the fleet contains genuinely unconfigured nodes:
+// freshly-bootstrapped boxes with neither a run-list nor a policy assignment, as
+// distinct from policy nodes (which carry an empty run_list but a policy_name).
+func TestSeedBareNodes(t *testing.T) {
+	_, org, _ := loadSeed(t)
+
+	bare := 0
+	for _, name := range org.Keys("nodes") {
+		raw, _ := org.Get("nodes", name)
+		var node struct {
+			RunList     []string `json:"run_list"`
+			PolicyName  string   `json:"policy_name"`
+			PolicyGroup string   `json:"policy_group"`
+		}
+		if err := json.Unmarshal(raw, &node); err != nil {
+			t.Fatalf("node %s: %v", name, err)
+		}
+		if len(node.RunList) == 0 && node.PolicyName == "" && node.PolicyGroup == "" {
+			bare++
+		}
+	}
+	if bare < 8 {
+		t.Errorf("fleet has %d bare (no run-list, no policy) nodes, want >= 8", bare)
+	}
+}
+
+// recentCheckinFloor is a Unix timestamp safely after the original June-2024
+// seed times: every node's last check-in (ohai_time) must be newer, modelling an
+// active fleet that has all reported in recently rather than a stale snapshot.
+// 1780000000 == 2026-05-31T16:26:40Z.
+const recentCheckinFloor = 1780000000.0
+
+// TestSeedRecentSplayedCheckins verifies every node's last check-in is recent,
+// the times are not all identical, and the whole fleet falls within a ~1h
+// window — i.e. a realistic, randomly-splayed wave of chef-client runs.
+func TestSeedRecentSplayedCheckins(t *testing.T) {
+	_, org, _ := loadSeed(t)
+
+	var min, max float64
+	distinct := map[float64]bool{}
+	first := true
+	for _, name := range org.Keys("nodes") {
+		raw, _ := org.Get("nodes", name)
+		var node nodeAutomatic
+		if err := json.Unmarshal(raw, &node); err != nil {
+			t.Fatalf("node %s: %v", name, err)
+		}
+		ts := node.Automatic.OhaiTime
+		if ts < recentCheckinFloor {
+			t.Errorf("node %s last checked in at %.0f, want recent (>= %.0f)", name, ts, recentCheckinFloor)
+		}
+		distinct[ts] = true
+		if first || ts < min {
+			min = ts
+		}
+		if first || ts > max {
+			max = ts
+		}
+		first = false
+	}
+
+	if len(distinct) < 2 {
+		t.Errorf("all nodes share one check-in time, want a random splay")
+	}
+	if span := max - min; span > 3600 {
+		t.Errorf("check-in times span %.0fs, want all within a 1h (3600s) splay", span)
 	}
 }

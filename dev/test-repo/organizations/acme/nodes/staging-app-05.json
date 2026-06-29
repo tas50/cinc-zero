@@ -45,10 +45,10 @@
     },
     "chef_packages": {
       "chef": {
-        "version": "18.4.12"
+        "version": "15.17.4"
       }
     },
-    "ohai_time": 1718412120.0,
+    "ohai_time": 1782625141.0,
     "uptime_seconds": 392000
   }
 }

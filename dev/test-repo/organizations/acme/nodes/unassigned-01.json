@@ -1,43 +1,40 @@
 {
-  "name": "staging-web-02",
+  "name": "unassigned-01",
   "chef_type": "node",
   "json_class": "Chef::Node",
   "default": {},
   "override": {},
-  "chef_environment": "staging",
-  "run_list": [
-    "role[base]",
-    "role[web]"
-  ],
+  "chef_environment": "_default",
+  "run_list": [],
   "normal": {
     "tags": [
-      "staging-web-02"
+      "unassigned-01"
     ]
   },
   "automatic": {
-    "fqdn": "staging-web-02.acme.example.com",
-    "hostname": "staging-web-02",
-    "machinename": "staging-web-02",
+    "fqdn": "unassigned-01.acme.example.com",
+    "hostname": "unassigned-01",
+    "machinename": "unassigned-01",
     "domain": "acme.example.com",
-    "ipaddress": "10.0.1.35",
-    "macaddress": "52:54:00:00:00:52",
-    "platform": "debian",
+    "ipaddress": "10.0.1.76",
+    "macaddress": "52:54:00:00:00:7b",
+    "platform": "ubuntu",
     "platform_family": "debian",
-    "platform_version": "12",
+    "platform_version": "22.04",
     "os": "linux",
-    "os_version": "6.1.0-10-amd64",
+    "os_version": "5.15.0-30-generic",
     "kernel": {
       "name": "Linux",
-      "release": "6.1.0-10-amd64",
+      "release": "5.15.0-30-generic",
       "machine": "x86_64",
       "os": "GNU/Linux"
     },
     "cpu": {
-      "total": 4,
+      "total": 2,
       "model_name": "Intel(R) Xeon(R) CPU"
     },
     "memory": {
-      "total": "16777216kB"
+      "total": "2097152kB"
     },
     "virtualization": {
       "system": "kvm",
@@ -48,7 +45,7 @@
         "version": "19.3.14"
       }
     },
-    "ohai_time": 1782622921.0,
-    "uptime_seconds": 384000
+    "ohai_time": 1782624311.0,
+    "uptime_seconds": 720
   }
 }
