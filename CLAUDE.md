@@ -11,7 +11,7 @@ cinc-zero is a fully in-memory Chef Infra Server in Go for test pipelines. It sp
 - `make vet` / `make fmt` — `go vet ./...` / `gofmt -w .`.
 - `make conformance` — drives the real `knife` CLI against an in-process server; needs Cinc Workstation installed and is gated behind `-tags conformance` (skipped by default).
 - Single test: `go test ./internal/api/ -run TestName -v` (most logic lives in `internal/api`).
-- `make run ARGS="--enforce-acls --orgs acme"` — build and run; flags: `--addr`, `--orgs` (CSV), `--admin`, `--no-auth`, `--enforce-acls`, `--repo`, `--key-out`.
+- `make run ARGS="--enforce-acls --orgs acme"` — build and run; flags: `--addr`, `--orgs` (CSV), `--admin`, `--no-auth`, `--enforce-acls`, `--repo`, `--key-out`, `--storage` (`memory` default / `sqlite`), `--db` (SQLite path; required for `--storage sqlite`; env `CINC_ZERO_STORAGE`/`CINC_ZERO_DB`).
 
 Always run `make test && make vet` before committing. Development is strict TDD: write a failing test first.
 

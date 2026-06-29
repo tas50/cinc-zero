@@ -133,6 +133,44 @@ func buildStore(opts Options) (*store.Store, error) {
 	}
 }
 
+// serverKeysColl is a private global collection holding the PEM-encoded bootstrap
+// private keys (admin and per-org validators). It is not exposed by any API route,
+// so a durable backend can keep stable credentials across restarts. Real Chef
+// Infra Server never stores private keys; cinc-zero is a test server that already
+// keeps secrets (e.g. passwords) in its store, and persisting these keys is what
+// makes a restarted SQLite-backed server keep working with existing clients.
+const serverKeysColl = "server_keys"
+
+// serverKeyAdmin is the server_keys key under which the admin private key lives.
+const serverKeyAdmin = "admin"
+
+// serverKeyValidator names the server_keys entry for an org's validator key.
+func serverKeyValidator(org string) string { return "validator:" + org }
+
+// loadServerKey reads a persisted bootstrap private key from the global
+// server_keys collection. It returns (key, fresh, err): fresh is true when no key
+// was stored yet, signalling the caller to generate and persist one.
+func loadServerKey(st *store.Store, name string) (key *rsa.PrivateKey, fresh bool, err error) {
+	raw, ok, err := st.Global().Get(serverKeysColl, name)
+	if err != nil {
+		return nil, false, err
+	}
+	if !ok {
+		return nil, true, nil
+	}
+	key, err = auth.ParsePrivateKey(raw)
+	if err != nil {
+		return nil, false, fmt.Errorf("parse stored %q key: %w", name, err)
+	}
+	return key, false, nil
+}
+
+// storeServerKey persists a bootstrap private key in the global server_keys
+// collection.
+func storeServerKey(st *store.Store, name string, key *rsa.PrivateKey) error {
+	return st.Global().Put(serverKeysColl, name, auth.EncodePrivateKeyPEM(key))
+}
+
 // Server is a running (or ready-to-run) cinc-zero instance.
 type Server struct {
 	opts          Options
@@ -163,29 +201,75 @@ func New(opts Options) (*Server, error) {
 		return nil, err
 	}
 
-	// RSA-2048 key generation is the dominant startup cost and each key is
-	// independent, so generate the admin key and every org's validator key in
-	// parallel, then seed the store serially with the results. keys[0] is the
-	// admin key; keys[i+1] is the validator key for opts.Orgs[i].
-	keys, err := generateKeys(len(opts.Orgs) + 1)
+	// Bootstrap (or, against a durable backend that already holds state, reload)
+	// the admin user and each organization. The private keys for the admin and the
+	// per-org validators are persisted in the global server_keys collection, so a
+	// restart on a populated store keeps stable credentials rather than
+	// regenerating them and invalidating existing clients. On the in-memory backend
+	// the store always starts empty, so this is identical to a clean bootstrap.
+	adminPriv, adminFresh, err := loadServerKey(st, serverKeyAdmin)
 	if err != nil {
 		return nil, err
+	}
+	type orgPlan struct {
+		name   string
+		priv   *rsa.PrivateKey
+		create bool
+	}
+	plans := make([]orgPlan, len(opts.Orgs))
+	nGen := 0
+	if adminFresh {
+		nGen++
+	}
+	for i, name := range opts.Orgs {
+		priv, fresh, err := loadServerKey(st, serverKeyValidator(name))
+		if err != nil {
+			return nil, err
+		}
+		plans[i] = orgPlan{name: name, priv: priv, create: fresh}
+		if fresh {
+			nGen++
+		}
 	}
 
-	// Bootstrap the admin user.
-	pubPEM, err := auth.EncodePublicKeyPEM(&keys[0].PublicKey)
+	// RSA-2048 generation is the dominant startup cost; generate only the keys we
+	// actually need — all of them on a fresh store, none on a clean restart — in
+	// parallel.
+	gen, err := generateKeys(nGen)
 	if err != nil {
 		return nil, err
 	}
-	adminDoc := fmt.Sprintf(`{"username":%q,"admin":true,"public_key":%q}`, opts.AdminName, string(pubPEM))
-	if err := st.Global().Put("users", opts.AdminName, []byte(adminDoc)); err != nil {
-		return nil, err
+	gi := 0
+	if adminFresh {
+		adminPriv = gen[gi]
+		gi++
+	}
+	for i := range plans {
+		if plans[i].create {
+			plans[i].priv = gen[gi]
+			gi++
+		}
+	}
+
+	// On a fresh store, write the admin user record and persist its private key.
+	if adminFresh {
+		pubPEM, err := auth.EncodePublicKeyPEM(&adminPriv.PublicKey)
+		if err != nil {
+			return nil, err
+		}
+		adminDoc := fmt.Sprintf(`{"username":%q,"admin":true,"public_key":%q}`, opts.AdminName, string(pubPEM))
+		if err := st.Global().Put("users", opts.AdminName, []byte(adminDoc)); err != nil {
+			return nil, err
+		}
+		if err := storeServerKey(st, serverKeyAdmin, adminPriv); err != nil {
+			return nil, err
+		}
 	}
 
 	// The webui key verifies management-console requests (X-Ops-Request-Source:
 	// web). It defaults to the admin key, so the --key-out key acts as the webui
 	// key without extra setup; a distinct key may be supplied via WebUIKey.
-	webuiPub := &keys[0].PublicKey
+	webuiPub := &adminPriv.PublicKey
 	if len(opts.WebUIKey) > 0 {
 		webuiPub, err = parseWebUIKey(opts.WebUIKey)
 		if err != nil {
@@ -194,12 +278,20 @@ func New(opts Options) (*Server, error) {
 	}
 
 	validatorKeys := make(map[string][]byte, len(opts.Orgs))
-	for i, name := range opts.Orgs {
-		validator, err := api.CreateOrganizationWithKey(st, name, name, keys[i+1])
-		if err != nil {
-			return nil, fmt.Errorf("create org %q: %w", name, err)
+	for _, p := range plans {
+		if !p.create {
+			// Org was bootstrapped on a prior run; reuse its stored validator key.
+			validatorKeys[p.name] = auth.EncodePrivateKeyPEM(p.priv)
+			continue
 		}
-		validatorKeys[name] = validator
+		validator, err := api.CreateOrganizationWithKey(st, p.name, p.name, p.priv)
+		if err != nil {
+			return nil, fmt.Errorf("create org %q: %w", p.name, err)
+		}
+		validatorKeys[p.name] = validator
+		if err := storeServerKey(st, serverKeyValidator(p.name), p.priv); err != nil {
+			return nil, err
+		}
 	}
 
 	// Load a chef-repo into the first organization, if configured.
@@ -228,7 +320,7 @@ func New(opts Options) (*Server, error) {
 	s := &Server{
 		opts:          opts,
 		store:         st,
-		adminKey:      auth.EncodePrivateKeyPEM(keys[0]),
+		adminKey:      auth.EncodePrivateKeyPEM(adminPriv),
 		validatorKeys: validatorKeys,
 		keyCache:      auth.NewPublicKeyCache(),
 		webuiPub:      webuiPub,

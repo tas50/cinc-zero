@@ -90,6 +90,49 @@ Pass `--repo ./chef-repo` to preload an on-disk chef-repo (its `nodes/`,
 Cookbook directories are checksummed into the blob store and served with a
 synthesized manifest.
 
+## Persistence and storage
+
+By default cinc-zero keeps all state in memory — the ephemeral "zero" experience
+that needs no disk and resets on exit. To persist state across restarts, point it
+at a SQLite database:
+
+```sh
+./cinc-zero --storage sqlite --db ./cinc.db
+```
+
+`--storage` accepts `memory` (default) or `sqlite`; `--storage sqlite` requires
+`--db <path>`. Both flags also read from the environment
+(`CINC_ZERO_STORAGE`, `CINC_ZERO_DB`), which is handy in containers. SQLite uses
+the pure-Go [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite) driver,
+so the static binary and `scratch`/`distroless` images keep working with
+`CGO_ENABLED=0`.
+
+The storage layer is pluggable behind a small `store.Backend` interface
+(`(org, collection, key) → bytes` plus a blob store), so PostgreSQL/RDS can be
+added later as a driver swap rather than a rewrite.
+
+**Restarts.** A SQLite-backed server is safe to stop and restart on the same
+database: it reloads existing organizations and data instead of recreating them,
+and the bootstrap admin/validator keys are persisted so the key written by
+`--key-out` keeps authenticating after a restart. (The in-memory backend always
+starts fresh.)
+
+**Backups** are delegated to the backend — cinc-zero ships no backup subsystem.
+For SQLite, take a consistent online copy while the server runs:
+
+```sh
+sqlite3 cinc.db "VACUUM INTO 'backup.db'"
+```
+
+or simply copy the `.db` file while the server is stopped. (A future Postgres/RDS
+backend would use `pg_dump` or managed snapshots.)
+
+**Upgrades** are forward-only: the SQLite schema carries a `schema_migrations`
+version and any pending migrations are applied automatically at startup, so
+upgrading the binary against an existing database just works. Because object
+bodies are stored as opaque JSON, the schema is tiny and rarely changes.
+Downgrading the binary against a newer database is not supported.
+
 ## Docker
 
 ```sh
@@ -101,6 +144,15 @@ Release images are published to GitHub Container Registry:
 
 ```sh
 docker run -p 8889:8889 ghcr.io/tas50/cinc-zero:latest
+```
+
+To persist state across container restarts, mount a volume and point SQLite at
+it (a single static binary on a `scratch`/`distroless` base, so the volume is the
+only stateful piece):
+
+```sh
+docker run -p 8889:8889 -v cinc-data:/data \
+  ghcr.io/tas50/cinc-zero:latest --storage sqlite --db /data/cinc.db
 ```
 
 ## Development
