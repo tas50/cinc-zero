@@ -15,10 +15,36 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// schemaVersion is the current on-disk schema revision recorded in
-// schema_migrations. Migrations are forward-only; bump this and extend migrate
-// when the schema changes.
-const schemaVersion = 1
+// A migration is a single, ordered, forward-only schema change. The migrations
+// list is APPEND-ONLY: once a version ships, its up func is a historical fact that
+// some database has already run, so it must never be edited — fix mistakes by
+// adding a new migration. up runs inside a transaction; it may issue DDL and/or
+// rewrite data.
+type migration struct {
+	version int
+	name    string
+	up      func(q querier) error
+}
+
+// migrations is the ordered, append-only schema history. To evolve the schema,
+// append a new entry with the next version; never edit or reorder existing ones.
+var migrations = []migration{
+	{
+		version: 1,
+		name:    "initial schema",
+		up: func(q querier) error {
+			_, err := q.Exec(`
+CREATE TABLE objects (
+  org TEXT NOT NULL, collection TEXT NOT NULL, key TEXT NOT NULL,
+  body BLOB NOT NULL, PRIMARY KEY (org, collection, key));
+CREATE TABLE blobs (
+  org TEXT NOT NULL, checksum TEXT NOT NULL, content BLOB NOT NULL,
+  PRIMARY KEY (org, checksum));
+CREATE TABLE orgs (name TEXT PRIMARY KEY);`)
+			return err
+		},
+	},
+}
 
 // querier is the subset of *sql.DB / *sql.Tx the data methods use, so the same
 // method bodies run either directly or inside a transaction.
@@ -68,27 +94,58 @@ func dsnWithPragmas(path string) string {
 	return path + sep + q.Encode()
 }
 
-// migrate creates the schema if absent and records the schema version. It is
-// forward-only and safe to run on every Open.
-func (b *Backend) migrate() error {
-	const ddl = `
-CREATE TABLE IF NOT EXISTS objects (
-  org TEXT NOT NULL, collection TEXT NOT NULL, key TEXT NOT NULL,
-  body BLOB NOT NULL, PRIMARY KEY (org, collection, key));
-CREATE TABLE IF NOT EXISTS blobs (
-  org TEXT NOT NULL, checksum TEXT NOT NULL, content BLOB NOT NULL,
-  PRIMARY KEY (org, checksum));
-CREATE TABLE IF NOT EXISTS orgs (name TEXT PRIMARY KEY);
-CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER NOT NULL);`
-	if _, err := b.q.Exec(ddl); err != nil {
-		return fmt.Errorf("schema: %w", err)
+// migrate brings the database up to the latest schema version by applying every
+// pending migration. It is forward-only and safe to run on every Open.
+func (b *Backend) migrate() error { return applyMigrations(b.db, migrations) }
+
+// Version returns the database's current schema version (0 if unmigrated).
+func (b *Backend) Version() (int, error) { return schemaVersion(b.db) }
+
+// schemaVersion reads the highest applied migration version, or 0 if none.
+func schemaVersion(db *sql.DB) (int, error) {
+	var v int
+	err := db.QueryRow(`SELECT COALESCE(MAX(version),0) FROM schema_migrations`).Scan(&v)
+	return v, err
+}
+
+// applyMigrations runs every migration in migs whose version exceeds the
+// database's recorded version, in order, each inside its own transaction
+// (recording the version on success so a migration applies exactly once). A
+// database recorded at a higher version than migs knows about is rejected rather
+// than run against an unknown schema (forward-only; no silent downgrade). Taking
+// migs as a parameter lets tests drive the engine with synthetic migration sets.
+func applyMigrations(db *sql.DB, migs []migration) error {
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)`); err != nil {
+		return fmt.Errorf("schema_migrations: %w", err)
 	}
-	var v sql.NullInt64
-	if err := b.q.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&v); err != nil {
+	current, err := schemaVersion(db)
+	if err != nil {
 		return err
 	}
-	if !v.Valid {
-		if _, err := b.q.Exec(`INSERT INTO schema_migrations(version) VALUES (?)`, schemaVersion); err != nil {
+	last := 0
+	if len(migs) > 0 {
+		last = migs[len(migs)-1].version
+	}
+	if current > last {
+		return fmt.Errorf("database schema is version %d but this cinc-zero only knows up to %d; upgrade the binary", current, last)
+	}
+	for _, m := range migs {
+		if m.version <= current {
+			continue
+		}
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		if err := m.up(tx); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("migration %d (%s): %w", m.version, m.name, err)
+		}
+		if _, err := tx.Exec(`INSERT INTO schema_migrations(version) VALUES (?)`, m.version); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("record migration %d: %w", m.version, err)
+		}
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
