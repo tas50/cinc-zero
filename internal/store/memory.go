@@ -1,6 +1,7 @@
 package store
 
 import (
+	"maps"
 	"sort"
 	"sync"
 )
@@ -186,6 +187,48 @@ func (m *memoryBackend) HasOrg(name string) (bool, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.orgs[name], nil
+}
+
+// Tx runs fn against this backend, taking a snapshot first and restoring it if fn
+// returns an error, so the transaction's writes are discarded on rollback and kept
+// on commit. The snapshot shares the immutable value slices (set always writes a
+// fresh slice), so it is cheap. Rollback is not isolated against other goroutines
+// writing concurrently during the transaction — fine for the bootstrap use it
+// serves (org create/delete); the SQLite backend provides true isolation.
+func (m *memoryBackend) Tx(fn func(tx Backend) error) error {
+	m.mu.Lock()
+	snapData := cloneOrgData(m.data)
+	snapBlobs := cloneBlobData(m.blobs)
+	snapOrgs := maps.Clone(m.orgs)
+	m.mu.Unlock()
+
+	if err := fn(m); err != nil {
+		m.mu.Lock()
+		m.data, m.blobs, m.orgs = snapData, snapBlobs, snapOrgs
+		m.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+func cloneOrgData(src map[string]map[string]map[string][]byte) map[string]map[string]map[string][]byte {
+	dst := make(map[string]map[string]map[string][]byte, len(src))
+	for org, colls := range src {
+		dc := make(map[string]map[string][]byte, len(colls))
+		for coll, keys := range colls {
+			dc[coll] = maps.Clone(keys) // value slices are immutable; safe to share
+		}
+		dst[org] = dc
+	}
+	return dst
+}
+
+func cloneBlobData(src map[string]map[string][]byte) map[string]map[string][]byte {
+	dst := make(map[string]map[string][]byte, len(src))
+	for org, blobs := range src {
+		dst[org] = maps.Clone(blobs)
+	}
+	return dst
 }
 
 func (m *memoryBackend) Close() error { return nil }

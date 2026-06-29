@@ -82,6 +82,18 @@ func (s *Store) ListOrgs() ([]string, error) {
 	return s.backend.ListOrgs()
 }
 
+// Tx runs fn as a single atomic transaction over the store: every write fn makes
+// through the *Store it receives commits together when fn returns nil, or is
+// discarded when fn returns a non-nil error (which Tx propagates). Use it for
+// multi-write operations that must not leave partial state behind on failure
+// (e.g. creating an organization). The *Store passed to fn must not be used after
+// fn returns.
+func (s *Store) Tx(fn func(tx *Store) error) error {
+	return s.backend.Tx(func(b Backend) error {
+		return fn(&Store{backend: b})
+	})
+}
+
 // Org is a handle to a single organization's collection of objects. The empty
 // name addresses the global space (see Store.Global).
 type Org struct {
