@@ -315,6 +315,14 @@ func addUserToOrgGroup(org *store.Org, group, user string) error {
 	return org.Put("groups", group, mustEncode(groupDoc(group, users, clients, groups)))
 }
 
+// AddUserToOrgGroup adds a global user to an org group, mirroring what
+// associateUser does when a user joins via the API. The state loader uses it to
+// reproduce that membership for users declared in members.json, which it writes
+// straight into the store rather than through the association handler.
+func AddUserToOrgGroup(org *store.Org, group, user string) error {
+	return addUserToOrgGroup(org, group, user)
+}
+
 // findInvite locates the org holding the given invitation id for the user.
 func (a *API) findInvite(user, id string) (*store.Org, bool, error) {
 	orgs, err := a.store.ListOrgs()

@@ -17,7 +17,7 @@ runtime — nothing is embedded in the binary.
 
 ## Web login
 
-`anna` is seeded with a password so a management console (e.g. cinc-console) has
+`tim` is seeded with a password so a management console (e.g. cinc-console) has
 a ready login. Run **with auth on** (not `--no-auth`) so the console's
 webui-signed `authenticate_user` is exercised:
 
@@ -25,11 +25,16 @@ webui-signed `authenticate_user` is exercised:
 cinc-zero --state dev/test-repo --key-out webui.pem   # admin key doubles as the webui key
 ```
 
-| user | password | notes |
-| ---- | -------- | ----- |
-| `anna` | `anna123` | global user with a public key; logs in via `authenticate_user` |
-| `ben` | _(none)_ | global user, no web password |
-| `pivotal` | _(none)_ | bootstrap admin/superuser, key-only |
+| user | password | access | notes |
+| ---- | -------- | ------ | ----- |
+| `tim` | `tim123` | **org admin** (acme `admins` group) | full read/write/grant; logs in via `authenticate_user` |
+| `jack` | _(none)_ | regular member (acme `users` group) | read access, no admin/grant; has a key but no web password |
+| `pivotal` | _(none)_ | global superuser | bootstrap admin, key-only, bypasses ACLs |
+
+Access levels mirror real Chef: `tim` is a full org admin (the fixture
+equivalent of `org-user-add acme tim --admin`), while `jack` is a plain member
+the loader adds to the `users` group. Under ACL enforcement the console acts as
+the logged-in user, so `tim` can edit everything and `jack` can only browse.
 
 Passwords are stashed out-of-band on load, mirroring `POST /users`: the
 `password` field is moved into the `passwords` collection and stripped from the
@@ -40,7 +45,7 @@ cinc-zero the password is kept in memory as-is rather than hashed.
 
 ```
 dev/test-repo/
-  users/                       global users: anna, ben
+  users/                       global users: tim, jack
   organizations/
     acme/
       nodes/                   107 nodes (see "Fleet" below)
@@ -57,7 +62,7 @@ dev/test-repo/
       data_bags/               users (deploy, ops, jenkins), secrets
                                (postgresql, redis, jenkins), apps (webapp, api)
       groups/                  devs (authz group)
-      members.json             org membership: anna, ben
+      members.json             org membership: tim, jack
 ```
 
 `members.json` associates global users with the org (its `association_users`),
@@ -134,7 +139,10 @@ Platforms vendored (fauxhai `main`):
 
 ## Not yet expressed
 
-Object **ACLs** (`acls/`) are not part of this fixture yet. The org's default
-container ACLs are seeded automatically when the org is created; custom ACLs
-can be added to the `--state` format in a follow-up once their on-disk shape is
-pinned against the API handlers.
+Custom per-object **ACLs** (`acls/`) are not part of this fixture yet. Access
+works through group membership instead: objects with no explicit ACL fall back
+to the default ACL (read for `admins`/`users`/`clients`), and the loader puts
+each member in the `users` group — so members read by default and `admins`
+(e.g. `tim`) can do everything. An on-disk `acls/` format for overriding
+individual objects can be added to the `--state` format in a follow-up once its
+shape is pinned against the API handlers.

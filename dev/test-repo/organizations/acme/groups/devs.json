@@ -2,17 +2,11 @@
   "groupname": "devs",
   "name": "devs",
   "actors": {
-    "users": [
-      "anna",
-      "ben"
-    ],
+    "users": [],
     "groups": [],
     "clients": []
   },
-  "users": [
-    "anna",
-    "ben"
-  ],
+  "users": [],
   "clients": [],
   "groups": []
 }
