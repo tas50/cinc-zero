@@ -42,6 +42,22 @@ Go binary (or a Docker image) with zero Ruby or gem dependencies. Drop it in,
 run it, and point your clients at it; embed it directly in Go tests as a
 library. No bundler, no rbenv, no native extensions.
 
+**Security: a tiny footprint to attack and to patch.** A production Chef Infra
+Server is a large, multi-service stack — Erlang (oc_erchef), Ruby, PostgreSQL, a
+search service, a message queue, and a reverse proxy — assembled from thousands
+of dependencies that all have to be tracked, audited, and kept patched. cinc-zero
+is the opposite: roughly 9k lines of Go whose **only third-party dependencies are
+the pure-Go SQLite driver and its support libraries** — everything else (the Chef
+API, Mixlib authentication, search, and storage) is written against the Go
+standard library, and those SQLite deps only run when you choose the durable
+backend. There is no database server, message broker, or web server to run and
+harden; no Ruby or Erlang runtime in the image; and the distroless/scratch
+container has no shell or OS package manager to exploit. The result is a
+dramatically smaller attack surface and far less dependency-patching toil than a
+full Chef Infra Server — while still authenticating clients with the same genuine
+Mixlib signed-request protocol, so the reduced footprint is not a reduced-security
+shortcut.
+
 See [`docs/specs`](docs/specs) for the full design.
 
 ## Use as a Go library
