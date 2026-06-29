@@ -157,27 +157,17 @@ docker run -p 8889:8889 -v cinc-data:/data \
 
 ## Development
 
-```sh
-go test ./... -race -cover
-```
-
-Authentication golden vectors under `internal/auth/testdata` are generated from
-the real `mixlib-authentication` gem via `ruby gen_vectors.rb`, guaranteeing
-byte-for-byte compatibility with Chef clients.
-
-### Conformance
-
-A build-tagged suite drives the real **`knife` CLI** (from Cinc Workstation)
-against an in-process cinc-zero server, exercising signed reads/writes, search,
-and the cookbook sandbox/upload flow:
+Building, testing, the `knife` conformance suite, the dev fixtures
+(`dev/test-repo` and the SQLite database `make dev-db` bakes from it), running a
+fully-seeded local server, the test account logins, and connecting a management
+console such as cinc-console are all covered in
+**[`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)**. A quick taste:
 
 ```sh
-make conformance        # needs knife from Cinc Workstation: https://omnitruck.cinc.sh/install.sh
+make test             # go test ./... -race -cover
+make run-dev          # in-memory, no auth, pre-loaded with the dev/test-repo seed
+make run-dev-sqlite   # a durable SQLite copy of the same data, auth on (for cinc-console)
 ```
-
-It skips automatically when no runnable `knife` is present, and runs in CI
-(`.github/workflows/conformance.yml`) after installing Cinc Workstation via
-omnitruck.
 
 ## License
 

@@ -43,6 +43,7 @@ type cliFlags struct {
 	webuiKey    string
 	storage     string
 	db          string
+	initOnly    bool
 }
 
 // hiddenFlags are registered and functional but omitted from usage/help output
@@ -67,6 +68,7 @@ func parseFlags(args []string, out io.Writer) (*cliFlags, error) {
 	fs.StringVar(&f.webuiKey, "webui-key", "", "path to a webui public/private key for X-Ops-Request-Source: web impersonation (defaults to the admin key)")
 	fs.StringVar(&f.storage, "storage", envOr("CINC_ZERO_STORAGE", "memory"), "storage backend: memory (ephemeral) or sqlite (durable)")
 	fs.StringVar(&f.db, "db", os.Getenv("CINC_ZERO_DB"), "sqlite database file path (required when --storage sqlite)")
+	fs.BoolVar(&f.initOnly, "init", false, "seed the store (bootstrap plus any configured seed) and exit without serving; use to pre-bake a SQLite database")
 
 	fs.Usage = func() {
 		fmt.Fprintf(out, "Usage of cinc-zero:\n")
@@ -129,15 +131,28 @@ func run(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if err := srv.Start(); err != nil {
-		return err
-	}
-
+	// The admin key is available right after New (before Start), so --key-out and
+	// --init both work without binding a listener.
 	if f.keyFile != "" {
 		if err := os.WriteFile(f.keyFile, srv.AdminKey(), 0o600); err != nil {
 			return fmt.Errorf("write key file: %w", err)
 		}
 		fmt.Fprintf(out, "Admin key for %q written to %s\n", srv.AdminName(), f.keyFile)
+	}
+
+	// --init seeds the store (bootstrap plus any --state/--repo load happened in
+	// server.New) and exits without serving, leaving a populated database behind.
+	if f.initOnly {
+		if f.storage == "sqlite" {
+			fmt.Fprintf(out, "initialized sqlite database %s; exiting without serving\n", f.db)
+		} else {
+			fmt.Fprintln(out, "initialized in-memory store; nothing persisted (use --storage sqlite --db to pre-bake a database)")
+		}
+		return srv.Stop(context.Background())
+	}
+
+	if err := srv.Start(); err != nil {
+		return err
 	}
 	fmt.Fprintf(out, "cinc-zero listening on %s\n", srv.URL())
 	fmt.Fprintf(out, "  orgs: %s\n  admin user: %s (auth %s, acl-enforcement %s)\n",

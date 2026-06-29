@@ -6,3 +6,7 @@ dist/
 *.pem
 .DS_Store
 *.swp
+# Generated dev databases (built from dev/test-repo via `make dev-db`).
+*.db
+*.db-wal
+*.db-shm
