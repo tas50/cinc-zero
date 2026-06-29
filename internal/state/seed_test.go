@@ -1,12 +1,107 @@
 package state
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/tas50/cinc-zero/internal/store"
 )
+
+// ohaiUptime renders a duration in seconds the way Ohai's uptime plugin does
+// (seconds_to_human), so the test can assert each node's automatic.uptime string
+// matches its uptime_seconds. The singular "1 day" case is intentional and
+// mirrors the real plugin.
+func ohaiUptime(seconds int64) string {
+	days := seconds / 86400
+	seconds -= 86400 * days
+	hours := seconds / 3600
+	seconds -= 3600 * hours
+	minutes := seconds / 60
+	seconds -= 60 * minutes
+
+	switch {
+	case days > 1:
+		return fmt.Sprintf("%d days %02d hours %02d minutes %02d seconds", days, hours, minutes, seconds)
+	case days == 1:
+		return fmt.Sprintf("%d day %02d hours %02d minutes %02d seconds", days, hours, minutes, seconds)
+	case hours > 0:
+		return fmt.Sprintf("%d hours %02d minutes %02d seconds", hours, minutes, seconds)
+	case minutes > 0:
+		return fmt.Sprintf("%d minutes %02d seconds", minutes, seconds)
+	default:
+		return fmt.Sprintf("%d seconds", seconds)
+	}
+}
+
+// TestSeedNodeUptime verifies every node carries a human-readable automatic.uptime
+// string consistent with its uptime_seconds, matching real Ohai output.
+func TestSeedNodeUptime(t *testing.T) {
+	_, org, _ := loadSeed(t)
+
+	for _, name := range org.Keys("nodes") {
+		raw, _ := org.Get("nodes", name)
+		var node struct {
+			Automatic struct {
+				Uptime        string `json:"uptime"`
+				UptimeSeconds int64  `json:"uptime_seconds"`
+			} `json:"automatic"`
+		}
+		if err := json.Unmarshal(raw, &node); err != nil {
+			t.Fatalf("node %s: %v", name, err)
+		}
+		if node.Automatic.Uptime == "" {
+			t.Errorf("node %s missing automatic.uptime", name)
+			continue
+		}
+		if want := ohaiUptime(node.Automatic.UptimeSeconds); node.Automatic.Uptime != want {
+			t.Errorf("node %s uptime = %q, want %q (from %d seconds)",
+				name, node.Automatic.Uptime, want, node.Automatic.UptimeSeconds)
+		}
+	}
+}
+
+// TestSeedNodesHaveRichOhai verifies the nodes carry the structurally rich Ohai
+// data fauxhai provides — non-empty filesystem and network (the signals every
+// fauxhai platform ships; dmi/block_device are platform-dependent) — and that
+// the node's own ipaddress and macaddress propagated into the network block
+// (proving the per-node identity overlay, not fauxhai's placeholder address).
+func TestSeedNodesHaveRichOhai(t *testing.T) {
+	_, org, _ := loadSeed(t)
+
+	for _, name := range org.Keys("nodes") {
+		raw, _ := org.Get("nodes", name)
+		var node struct {
+			Automatic struct {
+				IPAddress  string          `json:"ipaddress"`
+				MacAddress string          `json:"macaddress"`
+				Filesystem json.RawMessage `json:"filesystem"`
+				Network    json.RawMessage `json:"network"`
+			} `json:"automatic"`
+		}
+		if err := json.Unmarshal(raw, &node); err != nil {
+			t.Fatalf("node %s: %v", name, err)
+		}
+		a := node.Automatic
+		for field, val := range map[string]json.RawMessage{"filesystem": a.Filesystem, "network": a.Network} {
+			if len(val) == 0 || string(val) == "{}" || string(val) == "null" {
+				t.Errorf("node %s has empty automatic.%s, want rich fauxhai data", name, field)
+			}
+		}
+		if a.IPAddress == "" || a.MacAddress == "" {
+			t.Errorf("node %s missing automatic ipaddress/macaddress", name)
+			continue
+		}
+		if !bytes.Contains(a.Network, []byte(a.IPAddress)) {
+			t.Errorf("node %s ipaddress %q absent from automatic.network (identity overlay missing)", name, a.IPAddress)
+		}
+		if !bytes.Contains(a.Network, []byte(a.MacAddress)) {
+			t.Errorf("node %s macaddress %q absent from automatic.network (identity overlay missing)", name, a.MacAddress)
+		}
+	}
+}
 
 // seedDir is the committed dev/test-repo state directory, relative to this
 // package.
