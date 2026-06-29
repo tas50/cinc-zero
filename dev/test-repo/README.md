@@ -43,7 +43,7 @@ dev/test-repo/
   users/                       global users: anna, ben
   organizations/
     acme/
-      nodes/                   99 nodes (see "Fleet" below)
+      nodes/                   107 nodes (see "Fleet" below)
       roles/                   base, web, database, cache, loadbalancer,
                                monitoring, app, ci
       environments/            production, staging, development
@@ -71,8 +71,8 @@ then layers on `users/` (global) and per-org `groups/`.
 
 ## Fleet
 
-99 nodes spanning three environments and both run-list (role-based) and
-Policyfile (policy-based) management:
+107 nodes spanning three environments and run-list (role-based), Policyfile
+(policy-based), and unconfigured management:
 
 - **production** (42) — web (×15), app (×8), database (×8), cache (×5),
   loadbalancer (×3), monitoring (×3)
@@ -82,19 +82,39 @@ Policyfile (policy-based) management:
 - **policy-based** (19) — pinned to the `web-app` / `database` policies via the
   `production` and `staging` policy groups (`chef_environment` `_default`, as
   real policy nodes use)
+- **unconfigured** (8) — `unassigned-01`…`08`, freshly-bootstrapped boxes with
+  **no run-list and no policy**, sitting in the `_default` environment as a real
+  node does before it is assigned work
 
 Run-lists reference only roles that exist here, and policy nodes reference only
 policies pinned in their group — the `internal/state` seed test enforces that
 there are no dangling references. Each node carries a unique `ipaddress` and
 `macaddress`; the original 24 use the low `10.0.0.x` range, the rest `10.0.1.x`+.
 
+### Client version drift
+
+The fleet models a realistic upgrade in progress: **88 nodes run the current
+`cinc-client` / `chef-client` 19.3.14**, while ~10% (11 nodes) lag on a spread
+of older real releases (chef 13.12.14 through 18.4.12) across every environment.
+This exercises "who's behind?" reporting and search. The version lives in
+`automatic.chef_packages.chef.version` and is stamped independently of the
+platform fingerprint below.
+
+### Last check-in
+
+Every node's `automatic.ohai_time` is a recent timestamp, randomly splayed
+within a one-hour window, so the fixture reads as an active fleet that has all
+reported in lately rather than a stale snapshot. The splay is derived
+deterministically from each node's name, so the committed state is reproducible.
+
 ## Node automatic attributes — fauxhai provenance
 
 Each node's `automatic` attributes are derived from real [fauxhai][] Ohai
 dumps (`lib/fauxhai/platforms/<platform>/<version>.json`), trimmed to the
-commonly-used subset (platform/kernel/os, cpu, memory, virtualization, network
-identity, chef version) so the fixture stays a few KB per node. Per-node
-identity (`fqdn`, `hostname`, `ipaddress`, `macaddress`) is stamped on top.
+commonly-used subset (platform/kernel/os, cpu, memory, virtualization) so the
+fixture stays a few KB per node. Per-node identity (`fqdn`, `hostname`,
+`ipaddress`, `macaddress`), the client version (see "Client version drift"), and
+the last check-in (see "Last check-in") are stamped on top.
 
 Platforms vendored (fauxhai `main`):
 

@@ -1,39 +1,36 @@
 {
-  "name": "prod-cache-02",
+  "name": "unassigned-05",
   "chef_type": "node",
   "json_class": "Chef::Node",
   "default": {},
   "override": {},
-  "chef_environment": "production",
-  "run_list": [
-    "role[base]",
-    "role[cache]"
-  ],
+  "chef_environment": "_default",
+  "run_list": [],
   "normal": {
     "tags": [
-      "prod-cache-02"
+      "unassigned-05"
     ]
   },
   "automatic": {
-    "fqdn": "prod-cache-02.acme.example.com",
-    "hostname": "prod-cache-02",
-    "machinename": "prod-cache-02",
+    "fqdn": "unassigned-05.acme.example.com",
+    "hostname": "unassigned-05",
+    "machinename": "unassigned-05",
     "domain": "acme.example.com",
-    "ipaddress": "10.0.1.27",
-    "macaddress": "52:54:00:00:00:4a",
-    "platform": "debian",
-    "platform_family": "debian",
-    "platform_version": "12",
+    "ipaddress": "10.0.1.80",
+    "macaddress": "52:54:00:00:00:7f",
+    "platform": "almalinux",
+    "platform_family": "rhel",
+    "platform_version": "9.1",
     "os": "linux",
-    "os_version": "6.1.0-10-amd64",
+    "os_version": "5.14.0-162.6.1.el9_1.x86_64",
     "kernel": {
       "name": "Linux",
-      "release": "6.1.0-10-amd64",
+      "release": "5.14.0-162.6.1.el9_1.x86_64",
       "machine": "x86_64",
       "os": "GNU/Linux"
     },
     "cpu": {
-      "total": 4,
+      "total": 2,
       "model_name": "Intel(R) Xeon(R) CPU"
     },
     "memory": {
@@ -48,7 +45,7 @@
         "version": "19.3.14"
       }
     },
-    "ohai_time": 1782625228.0,
-    "uptime_seconds": 376000
+    "ohai_time": 1782625969.0,
+    "uptime_seconds": 1200
   }
 }

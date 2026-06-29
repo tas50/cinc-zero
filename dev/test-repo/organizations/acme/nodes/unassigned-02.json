@@ -1,26 +1,23 @@
 {
-  "name": "staging-web-02",
+  "name": "unassigned-02",
   "chef_type": "node",
   "json_class": "Chef::Node",
   "default": {},
   "override": {},
-  "chef_environment": "staging",
-  "run_list": [
-    "role[base]",
-    "role[web]"
-  ],
+  "chef_environment": "_default",
+  "run_list": [],
   "normal": {
     "tags": [
-      "staging-web-02"
+      "unassigned-02"
     ]
   },
   "automatic": {
-    "fqdn": "staging-web-02.acme.example.com",
-    "hostname": "staging-web-02",
-    "machinename": "staging-web-02",
+    "fqdn": "unassigned-02.acme.example.com",
+    "hostname": "unassigned-02",
+    "machinename": "unassigned-02",
     "domain": "acme.example.com",
-    "ipaddress": "10.0.1.35",
-    "macaddress": "52:54:00:00:00:52",
+    "ipaddress": "10.0.1.77",
+    "macaddress": "52:54:00:00:00:7c",
     "platform": "debian",
     "platform_family": "debian",
     "platform_version": "12",
@@ -33,11 +30,11 @@
       "os": "GNU/Linux"
     },
     "cpu": {
-      "total": 4,
+      "total": 2,
       "model_name": "Intel(R) Xeon(R) CPU"
     },
     "memory": {
-      "total": "16777216kB"
+      "total": "8388608kB"
     },
     "virtualization": {
       "system": "kvm",
@@ -48,7 +45,7 @@
         "version": "19.3.14"
       }
     },
-    "ohai_time": 1782622921.0,
-    "uptime_seconds": 384000
+    "ohai_time": 1782623122.0,
+    "uptime_seconds": 840
   }
 }
