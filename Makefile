@@ -15,7 +15,7 @@ LDFLAGS := -X $(LDFLAGS_PKG).version=$(VERSION) \
            -X $(LDFLAGS_PKG).commit=$(COMMIT) \
            -X $(LDFLAGS_PKG).buildDate=$(BUILD_DATE)
 
-.PHONY: all build dist install test conformance vet fmt tidy clean run run-dev help
+.PHONY: all build dist install test conformance vet fmt tidy clean run run-dev dev-db run-dev-sqlite help
 
 all: build
 
@@ -75,6 +75,18 @@ run: build
 ## run-dev: build and run cinc-zero pre-loaded with the dev/test-repo seed (no auth, key written to ./dev-admin.pem)
 run-dev: build
 	./$(BINARY) --no-auth --state dev/test-repo --key-out dev-admin.pem $(ARGS)
+
+DEV_DB ?= dev/cinc-dev.db
+
+## dev-db: bake the dev/test-repo seed into a SQLite database at $(DEV_DB)
+dev-db: build
+	rm -f $(DEV_DB) $(DEV_DB)-wal $(DEV_DB)-shm
+	./$(BINARY) --storage sqlite --db $(DEV_DB) --state dev/test-repo --key-out dev-admin.pem --init
+
+## run-dev-sqlite: serve the dev SQLite database (auth on, for cinc-console); builds it first if missing
+run-dev-sqlite: build
+	@test -f $(DEV_DB) || $(MAKE) dev-db
+	./$(BINARY) --storage sqlite --db $(DEV_DB) --key-out dev-admin.pem $(ARGS)
 
 ## help: list available targets
 help:

@@ -2,11 +2,15 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"flag"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tas50/cinc-zero/server"
 )
 
 // TestStateFlagHiddenFromUsage verifies the experimental --state flag is parsed
@@ -35,6 +39,28 @@ func TestStateFlagSetsStatePath(t *testing.T) {
 	}
 	if f.state != "/tmp/seed" {
 		t.Errorf("state = %q, want /tmp/seed", f.state)
+	}
+}
+
+// TestInitSeedsAndExits verifies --init populates a SQLite database and exits
+// without serving, and that the resulting database reopens cleanly (the
+// pre-baked-DB workflow the dev environment relies on).
+func TestInitSeedsAndExits(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "init.db")
+	var buf bytes.Buffer
+	if err := run([]string{"--storage", "sqlite", "--db", db, "--init", "--no-auth"}, &buf); err != nil {
+		t.Fatalf("run(--init): %v", err)
+	}
+	if !strings.Contains(buf.String(), "initialized sqlite database") {
+		t.Errorf("missing init confirmation, got: %q", buf.String())
+	}
+	// The baked database must reopen without recreating its org (idempotent).
+	srv, err := server.New(server.Options{Storage: "sqlite", DB: db, DisableAuth: true})
+	if err != nil {
+		t.Fatalf("reopen baked db: %v", err)
+	}
+	if err := srv.Stop(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }
 
