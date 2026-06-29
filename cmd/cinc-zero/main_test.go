@@ -64,6 +64,52 @@ func TestInitSeedsAndExits(t *testing.T) {
 	}
 }
 
+// TestEnforcementOnByDefault: the binary enforces ACLs unless told otherwise.
+func TestEnforcementOnByDefault(t *testing.T) {
+	f, err := parseFlags(nil, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !f.enforceACLs {
+		t.Error("--enforce-acls should default to true for the binary")
+	}
+}
+
+// TestEnforcementCanBeDisabled: --enforce-acls=false opts back into permissive.
+func TestEnforcementCanBeDisabled(t *testing.T) {
+	f, err := parseFlags([]string{"--enforce-acls=false"}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.enforceACLs {
+		t.Error("--enforce-acls=false should disable enforcement")
+	}
+}
+
+// TestNoAuthImpliesNoEnforcement: --no-auth must work on its own even though
+// enforcement is on by default (the two are mutually exclusive), rather than
+// erroring out of server.New.
+func TestNoAuthImpliesNoEnforcement(t *testing.T) {
+	var buf bytes.Buffer
+	if err := run([]string{"--no-auth", "--init"}, &buf); err != nil {
+		t.Fatalf("run(--no-auth --init): %v", err)
+	}
+}
+
+// TestNoAuthWithExplicitEnforceIsAnError: explicitly asking for both --no-auth
+// and --enforce-acls is contradictory and must fail loudly, not silently drop
+// enforcement.
+func TestNoAuthWithExplicitEnforceIsAnError(t *testing.T) {
+	var buf bytes.Buffer
+	err := run([]string{"--no-auth", "--enforce-acls=true", "--init"}, &buf)
+	if err == nil {
+		t.Fatal("expected an error for --no-auth --enforce-acls=true")
+	}
+	if !strings.Contains(err.Error(), "cannot be combined") {
+		t.Errorf("unclear conflict error: %v", err)
+	}
+}
+
 // TestVersionSubcommand verifies the "version" subcommand prints the injected
 // build metadata and exits without starting the server.
 func TestVersionSubcommand(t *testing.T) {

@@ -63,6 +63,12 @@ func CreateOrganizationWithKey(st *store.Store, name, fullName string, key *rsa.
 	clientsACL := defaultACL()
 	clientsACL["create"] = map[string]any{"actors": []string{validator}, "groups": []string{"admins", "users"}}
 
+	// Grant the "clients" group create on the nodes container, mirroring real
+	// Chef: a registered client (which joins that group) can create its own node.
+	// Item operations on a node remain governed by its per-object ACL.
+	nodesACL := defaultACL()
+	nodesACL["create"] = map[string]any{"actors": []string{}, "groups": []string{"admins", "users", "clients"}}
+
 	// Provision the org atomically: a failure partway through (more likely on a
 	// durable backend) must not leave a half-created organization behind.
 	if err := st.Tx(func(tx *store.Store) error {
@@ -79,7 +85,10 @@ func CreateOrganizationWithKey(st *store.Store, name, fullName string, key *rsa.
 		if err := org.Put("clients", validator, []byte(clientDoc)); err != nil {
 			return err
 		}
-		return org.Put("acls", aclKey("containers", "clients"), mustEncode(clientsACL))
+		if err := org.Put("acls", aclKey("containers", "clients"), mustEncode(clientsACL)); err != nil {
+			return err
+		}
+		return org.Put("acls", aclKey("containers", "nodes"), mustEncode(nodesACL))
 	}); err != nil {
 		return nil, err
 	}

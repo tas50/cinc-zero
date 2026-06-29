@@ -77,13 +77,19 @@ adminID  := srv.AdminName()           // "pivotal"
 
 For tests that don't want to sign requests, set `Options{DisableAuth: true}`.
 
-ACLs and group membership are stored but not enforced by default; every
-authenticated actor is permitted, which keeps test pipelines friction-free. To
-exercise authorization-dependent behavior (requests a real server answers with
-`403 Forbidden`), set `Options{EnforceACL: true}`. Enforcement honors the
-default groups/ACLs seeded at org creation, resolves actor membership through
-nested groups, and checks authentication → existence → authorization in that
-order (so a missing object reports `404`, not `403`). Enforcement covers the
+As a Go library the zero value is permissive: ACLs and group membership are
+stored but not enforced, so every authenticated actor is permitted and test
+pipelines stay friction-free. To exercise authorization-dependent behavior
+(requests a real server answers with `403 Forbidden`), set
+`Options{EnforceACL: true}`. (The standalone `cinc-zero` binary takes the
+opposite, production-leaning default — it **enforces** unless told otherwise; see
+"Use as a binary".) Enforcement matches a real Chef Infra Server: the creator of
+an object is granted full control of it, a registered client joins the org's
+`clients` group and can create and manage its own node, and the standard
+chef-client bootstrap works end to end. It honors the default groups/ACLs seeded
+at org creation, resolves actor membership through nested groups, and checks
+authentication → existence → authorization in that order (so a missing object
+reports `404`, not `403`). Enforcement covers the
 org-scoped object endpoints (nodes, roles, data bags, cookbooks, groups,
 containers, …), the org's own `_acl`, and the global actor endpoints: the
 `/users` collection is superuser-only (a user may still read or update its own
@@ -99,9 +105,14 @@ go build -o cinc-zero ./cmd/cinc-zero
 ./cinc-zero --addr 127.0.0.1:8889 --orgs test --key-out admin.pem
 ```
 
-Pass `--enforce-acls` to turn on ACL enforcement (off by default; see the
-`EnforceACL` option above). Pass `--no-auth` to disable signature verification
-(the two are mutually exclusive; enforcement needs an authenticated actor).
+The binary **enforces ACLs by default** — a freshly bootstrapped org behaves like
+a real Chef Infra Server, and the standard chef-client lifecycle (a validator
+registers a client, which then creates and updates its own node) works out of the
+box. Pass `--enforce-acls=false` for a permissive server where every authenticated
+actor is allowed. Pass `--no-auth` to disable signature verification entirely
+(this also disables enforcement, since it needs an authenticated actor); asking
+for `--no-auth` together with an explicit `--enforce-acls` is a contradiction and
+errors out.
 
 Pass `--repo ./chef-repo` to preload an on-disk chef-repo (its `nodes/`,
 `roles/`, `environments/`, `clients/`, `policies/`, `policy_groups/`,

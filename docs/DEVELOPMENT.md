@@ -61,11 +61,13 @@ make dev-db
 ## Running a dev server
 
 ```sh
-# In-memory, no auth — fastest for poking at the API with curl/knife:
+# In-memory, no auth — fastest for poking at the API with curl/knife. --no-auth
+# also turns off ACL enforcement:
 make run-dev            # --no-auth --state dev/test-repo --key-out dev-admin.pem
 
-# Durable SQLite, auth ON — what a management console needs (builds the DB first
-# if missing):
+# Durable SQLite with auth AND ACL enforcement on (the binary's defaults) — what a
+# management console needs, and how a real Chef Infra Server behaves (builds the DB
+# first if missing):
 make run-dev-sqlite     # --storage sqlite --db dev/cinc-dev.db --key-out dev-admin.pem
 ```
 
@@ -115,6 +117,7 @@ no extra setup. (To use a distinct key instead, pass `--webui-key <path>`.)
    the `acme` org's nodes, roles, environments, data bags, cookbooks, and
    Policyfiles, with the server enforcing that user's view.
 
-Run the server with `--enforce-acls` to have it answer with real `403`s where a
-production Chef Infra Server would, so the console exercises authorization the
-same way it would against the real thing.
+ACL enforcement is on by default, so the console exercises authorization exactly
+as it would against a real Chef Infra Server — answering with `403` where a
+production server would. Pass `--enforce-acls=false` if you want a permissive
+server where every authenticated actor is allowed.

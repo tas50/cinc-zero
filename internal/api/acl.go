@@ -65,6 +65,34 @@ func defaultACL() map[string]any {
 	}
 }
 
+// writeCreatorACL seeds a newly created object's per-object ACL from the container
+// default plus the creating actor, granting the creator full control of what it
+// created (mirroring Chef, where the creator owns the object — e.g. a chef-client
+// can update the node it just registered). It is written only under ACL
+// enforcement, so the permissive default stores no extra ACLs.
+func writeCreatorACL(org *store.Org, typ, name, creator string) error {
+	acl := defaultACL()
+	for _, p := range aclPerms {
+		ace := acl[p].(map[string]any)
+		ace["actors"] = append(ace["actors"].([]string), creator)
+	}
+	return org.Put("acls", aclKey(typ, name), mustEncode(acl))
+}
+
+// grantCreator records the creating actor as the owner of a newly created object.
+// It is a no-op unless ACL enforcement is on and a verified actor is present, so
+// the permissive default writes no per-object ACLs and behaves exactly as before.
+func (a *API) grantCreator(r *http.Request, org *store.Org, typ, name string) error {
+	if !a.enforceACL {
+		return nil
+	}
+	actor, ok := actorFromContext(r.Context())
+	if !ok {
+		return nil
+	}
+	return writeCreatorACL(org, typ, name, actor.Name)
+}
+
 func loadACL(org *store.Org, typ, name string) (map[string]any, error) {
 	raw, ok, err := org.Get("acls", aclKey(typ, name))
 	if err != nil {

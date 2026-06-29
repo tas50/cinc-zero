@@ -32,18 +32,19 @@ func main() {
 
 // cliFlags holds the parsed command-line options.
 type cliFlags struct {
-	addr        string
-	orgsCSV     string
-	admin       string
-	keyFile     string
-	noAuth      bool
-	enforceACLs bool
-	repo        string
-	state       string
-	webuiKey    string
-	storage     string
-	db          string
-	initOnly    bool
+	addr           string
+	orgsCSV        string
+	admin          string
+	keyFile        string
+	noAuth         bool
+	enforceACLs    bool
+	enforceACLsSet bool // whether --enforce-acls was passed explicitly
+	repo           string
+	state          string
+	webuiKey       string
+	storage        string
+	db             string
+	initOnly       bool
 }
 
 // hiddenFlags are registered and functional but omitted from usage/help output
@@ -61,8 +62,8 @@ func parseFlags(args []string, out io.Writer) (*cliFlags, error) {
 	fs.StringVar(&f.orgsCSV, "orgs", "acme", "comma-separated organizations to create")
 	fs.StringVar(&f.admin, "admin", "pivotal", "bootstrap admin user name")
 	fs.StringVar(&f.keyFile, "key-out", "", "write the admin private key to this file")
-	fs.BoolVar(&f.noAuth, "no-auth", false, "disable request signature verification")
-	fs.BoolVar(&f.enforceACLs, "enforce-acls", false, "enforce object ACLs and group membership (default: permissive)")
+	fs.BoolVar(&f.noAuth, "no-auth", false, "disable request signature verification (also disables ACL enforcement)")
+	fs.BoolVar(&f.enforceACLs, "enforce-acls", true, "enforce object ACLs and group membership; pass --enforce-acls=false for a permissive server")
 	fs.StringVar(&f.repo, "repo", "", "path to a chef-repo to load into the first org at startup")
 	fs.StringVar(&f.state, "state", "", "path to a full server-state directory to load at startup")
 	fs.StringVar(&f.webuiKey, "webui-key", "", "path to a webui public/private key for X-Ops-Request-Source: web impersonation (defaults to the admin key)")
@@ -87,6 +88,14 @@ func parseFlags(args []string, out io.Writer) (*cliFlags, error) {
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
+	// Record whether --enforce-acls was set explicitly (vs. left at its default),
+	// so --no-auth can override the implicit default but conflict loudly with an
+	// explicit request for enforcement.
+	fs.Visit(func(fl *flag.Flag) {
+		if fl.Name == "enforce-acls" {
+			f.enforceACLsSet = true
+		}
+	})
 	return &f, nil
 }
 
@@ -114,6 +123,16 @@ func run(args []string, out io.Writer) error {
 		if err != nil {
 			return fmt.Errorf("read webui key: %w", err)
 		}
+	}
+
+	// ACL enforcement requires an authenticated actor. --no-auth on its own simply
+	// turns off the default-on enforcement; but explicitly asking for both is a
+	// contradiction we fail loudly on rather than silently dropping enforcement.
+	if f.noAuth {
+		if f.enforceACLsSet && f.enforceACLs {
+			return errors.New("--no-auth cannot be combined with --enforce-acls: ACL enforcement requires authentication")
+		}
+		f.enforceACLs = false
 	}
 
 	srv, err := server.New(server.Options{
