@@ -45,4 +45,4 @@ cmd/cinc-zero (flag parsing)
 - **API version negotiation** runs ahead of routing (`withAPIVersion`, `server_endpoints.go`): non-numeric `X-Ops-Server-API-Version` → 400, out-of-range → 406.
 - **Tests:** API-layer tests use `newTestAPI(t)` + `do(t, method, url, body)` (no auth, raw store). Server-layer tests use `startServer(t, Options{})` + `signed(t, srv, …)` (full middleware, real signatures). Note `newTestAPI` does **not** seed default groups/ACLs — only `server.New`/`CreateOrganization` do.
 
-The README status table is the authoritative feature map; package doc comments are accurate. Design specs live in `docs/superpowers/specs/`.
+The README status table is the authoritative feature map; package doc comments are accurate. Design specs live in `docs/specs/`.
