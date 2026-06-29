@@ -24,19 +24,32 @@ var defaultContainers = []string{
 }
 
 // seedAuthz adds the default groups and containers Chef creates in every org.
-func seedAuthz(org *store.Org) {
+func seedAuthz(org *store.Org) error {
 	for _, g := range defaultGroups {
-		if _, ok := org.Get("groups", g); !ok {
-			org.Put("groups", g, fmt.Appendf(nil,
-				`{"name":%q,"groupname":%q,"actors":[],"users":[],"clients":[],"groups":[]}`, g, g))
+		_, ok, err := org.Get("groups", g)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			if err := org.Put("groups", g, fmt.Appendf(nil,
+				`{"name":%q,"groupname":%q,"actors":[],"users":[],"clients":[],"groups":[]}`, g, g)); err != nil {
+				return err
+			}
 		}
 	}
 	for _, c := range defaultContainers {
-		if _, ok := org.Get("containers", c); !ok {
-			org.Put("containers", c, fmt.Appendf(nil,
-				`{"containername":%q,"containerpath":%q}`, c, c))
+		_, ok, err := org.Get("containers", c)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			if err := org.Put("containers", c, fmt.Appendf(nil,
+				`{"containername":%q,"containerpath":%q}`, c, c)); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 func (a *API) registerAuthzRoutes(mux *http.ServeMux) {
@@ -82,6 +95,9 @@ func (a *API) createGroup(w http.ResponseWriter, r *http.Request) {
 	if errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, "Object already exists")
 		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]string{
 		"uri": objectURL(r, org.Name(), "groups", name),
@@ -104,7 +120,10 @@ func (a *API) putGroup(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	users, clients, groups := groupMembers(obj)
 	doc := mustEncode(groupDoc(name, users, clients, groups))
-	org.Put("groups", name, doc)
+	if err := org.Put("groups", name, doc); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeRaw(w, http.StatusOK, doc)
 }
 
@@ -190,7 +209,10 @@ func (a *API) createContainer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Field 'containername' missing")
 		return
 	}
-	org.Put("containers", name, mustEncode(obj))
+	if err := org.Put("containers", name, mustEncode(obj)); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusCreated, map[string]string{
 		"uri": objectURL(r, org.Name(), "containers", name),
 	})

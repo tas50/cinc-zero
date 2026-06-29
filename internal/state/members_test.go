@@ -25,12 +25,19 @@ func TestLoadMembersAssociatesUsers(t *testing.T) {
 	if _, err := Load(st, dir); err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	org, ok := st.Org("acme")
+	org, ok, err := st.Org("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("acme not created")
 	}
 	for _, name := range []string{"anna", "ben", "cara"} {
-		if _, ok := org.Get(api.AssociationUsersCollection, name); !ok {
+		_, ok, err := org.Get(api.AssociationUsersCollection, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
 			t.Errorf("%s not associated with acme", name)
 		}
 	}
@@ -39,7 +46,11 @@ func TestLoadMembersAssociatesUsers(t *testing.T) {
 // The committed seed associates anna and ben with acme.
 func TestSeedAssociatesAnna(t *testing.T) {
 	_, org, _ := loadSeed(t)
-	if _, ok := org.Get(api.AssociationUsersCollection, "anna"); !ok {
+	_, ok, err := org.Get(api.AssociationUsersCollection, "anna")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
 		t.Error("anna is not a member of acme in the seed")
 	}
 }

@@ -73,11 +73,17 @@ func (a *API) principal(w http.ResponseWriter, r *http.Request) {
 	}
 	name := r.PathValue("name")
 
-	if raw, ok := org.Get("clients", name); ok {
+	if raw, ok, err := org.Get("clients", name); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if ok {
 		writeJSON(w, http.StatusOK, principalDoc(name, "client", raw))
 		return
 	}
-	if raw, ok := a.store.Global().Get("users", name); ok {
+	if raw, ok, err := a.store.Global().Get("users", name); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if ok {
 		writeJSON(w, http.StatusOK, principalDoc(name, "user", raw))
 		return
 	}

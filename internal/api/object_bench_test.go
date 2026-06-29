@@ -12,10 +12,15 @@ import (
 // router for a large collection: key collection + URL building + JSON encoding.
 func BenchmarkListObjects(b *testing.B) {
 	st := store.New()
-	org, _ := st.CreateOrg("acme")
+	org, err := st.CreateOrg("acme")
+	if err != nil {
+		b.Fatal(err)
+	}
 	a := New(st)
 	for i := range 500 {
-		org.Put("nodes", fmt.Sprintf("node%d", i), []byte(`{"name":"x"}`))
+		if err := org.Put("nodes", fmt.Sprintf("node%d", i), []byte(`{"name":"x"}`)); err != nil {
+			b.Fatal(err)
+		}
 	}
 	h := a.Handler()
 	req := httptest.NewRequest("GET", "http://127.0.0.1/organizations/acme/nodes", nil)

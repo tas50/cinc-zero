@@ -65,14 +65,18 @@ func defaultACL() map[string]any {
 	}
 }
 
-func loadACL(org *store.Org, typ, name string) map[string]any {
-	if raw, ok := org.Get("acls", aclKey(typ, name)); ok {
+func loadACL(org *store.Org, typ, name string) (map[string]any, error) {
+	raw, ok, err := org.Get("acls", aclKey(typ, name))
+	if err != nil {
+		return nil, err
+	}
+	if ok {
 		var m map[string]any
 		if json.Unmarshal(raw, &m) == nil {
-			return m
+			return m, nil
 		}
 	}
-	return defaultACL()
+	return defaultACL(), nil
 }
 
 // The org-scoped object handlers resolve the {org} path value to its store and
@@ -135,7 +139,12 @@ func (a *API) putUserACLPerm(w http.ResponseWriter, r *http.Request) {
 
 // writeACLDoc writes the full five-permission ACL for an object.
 func writeACLDoc(w http.ResponseWriter, org *store.Org, typ, name string) {
-	writeJSON(w, http.StatusOK, loadACL(org, typ, name))
+	acl, err := loadACL(org, typ, name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, acl)
 }
 
 // writeACLPermDoc writes a single permission's ACE, 404ing on an unknown perm.
@@ -144,7 +153,12 @@ func writeACLPermDoc(w http.ResponseWriter, org *store.Org, typ, name, perm stri
 		writeError(w, http.StatusNotFound, "Cannot find ACL permission "+perm)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{perm: loadACL(org, typ, name)[perm]})
+	acl, err := loadACL(org, typ, name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{perm: acl[perm]})
 }
 
 // updateACLPermDoc replaces a single permission's ACE and writes it back with
@@ -165,8 +179,15 @@ func updateACLPermDoc(w http.ResponseWriter, r *http.Request, org *store.Org, ty
 		ace = inner
 	}
 
-	acl := loadACL(org, typ, name)
+	acl, err := loadACL(org, typ, name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	acl[perm] = ace
-	org.Put("acls", aclKey(typ, name), mustEncode(acl))
+	if err := org.Put("acls", aclKey(typ, name), mustEncode(acl)); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, status, map[string]any{perm: ace})
 }

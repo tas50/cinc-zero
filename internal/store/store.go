@@ -1,14 +1,17 @@
-// Package store is the in-memory data store for cinc-zero. All Chef objects
-// live here, namespaced by organization then by collection (e.g. "nodes",
-// "roles") then by key. Values are stored as raw canonical JSON so client
-// payloads round-trip exactly.
+// Package store is the data store for cinc-zero. All Chef objects live here,
+// namespaced by organization then by collection (e.g. "nodes", "roles") then by
+// key. Values are stored as raw canonical JSON so client payloads round-trip
+// exactly.
+//
+// Store and Org are a thin facade over a pluggable Backend (see backend.go): the
+// facade owns the canonical-JSON/copy semantics and the org-handle ergonomics,
+// while the Backend persists opaque bytes. New defaults to the in-memory backend
+// (the ephemeral "zero" experience); a durable backend (e.g. SQLite) is supplied
+// via NewWithBackend. Because the Backend can fail (a database read or write may
+// error), the data-access methods return an error that callers must handle.
 package store
 
-import (
-	"errors"
-	"sort"
-	"sync"
-)
+import "errors"
 
 var (
 	// ErrConflict is returned by Create when the key already exists.
@@ -18,77 +21,72 @@ var (
 )
 
 // Store holds every organization's data plus a global space for server-level
-// objects (users and organization metadata) that live outside any org.
+// objects (users and organization metadata) that live outside any org. It is a
+// facade over a Backend.
 type Store struct {
-	mu     sync.RWMutex
-	orgs   map[string]*Org
-	global *Org
+	backend Backend
 }
 
-// New returns an empty Store.
+// New returns a Store backed by the default in-memory backend.
 func New() *Store {
-	return &Store{
-		orgs:   make(map[string]*Org),
-		global: &Org{name: "", data: make(map[string]map[string][]byte)},
-	}
+	return &Store{backend: NewMemoryBackend()}
 }
+
+// NewWithBackend returns a Store backed by b. Use this to run against a durable
+// backend such as SQLite.
+func NewWithBackend(b Backend) *Store {
+	return &Store{backend: b}
+}
+
+// Backend returns the underlying Backend, for callers (e.g. the server) that need
+// to close it or pass it to a transaction.
+func (s *Store) Backend() Backend { return s.backend }
+
+// Close releases the underlying backend's resources (e.g. the SQLite handle).
+func (s *Store) Close() error { return s.backend.Close() }
 
 // Global returns the server-global object space, used for collections such as
 // "users" and "organizations" that are not scoped to an organization.
 func (s *Store) Global() *Org {
-	return s.global
+	return &Org{backend: s.backend, name: ""}
 }
 
 // CreateOrg creates a new, empty organization. It returns ErrConflict if an
 // organization with the same name already exists.
 func (s *Store) CreateOrg(name string) (*Org, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.orgs[name]; ok {
-		return nil, ErrConflict
+	if err := s.backend.CreateOrg(name); err != nil {
+		return nil, err
 	}
-	org := &Org{name: name, data: make(map[string]map[string][]byte)}
-	s.orgs[name] = org
-	return org, nil
+	return &Org{backend: s.backend, name: name}, nil
 }
 
-// Org returns the named organization.
-func (s *Store) Org(name string) (*Org, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	org, ok := s.orgs[name]
-	return org, ok
+// Org returns the named organization and whether it exists.
+func (s *Store) Org(name string) (*Org, bool, error) {
+	ok, err := s.backend.HasOrg(name)
+	if err != nil {
+		return nil, false, err
+	}
+	if !ok {
+		return nil, false, nil
+	}
+	return &Org{backend: s.backend, name: name}, true, nil
 }
 
 // DeleteOrg removes an organization, reporting whether it existed.
-func (s *Store) DeleteOrg(name string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.orgs[name]; !ok {
-		return false
-	}
-	delete(s.orgs, name)
-	return true
+func (s *Store) DeleteOrg(name string) (bool, error) {
+	return s.backend.DeleteOrg(name)
 }
 
 // ListOrgs returns the organization names in sorted order.
-func (s *Store) ListOrgs() []string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	names := make([]string, 0, len(s.orgs))
-	for name := range s.orgs {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
+func (s *Store) ListOrgs() ([]string, error) {
+	return s.backend.ListOrgs()
 }
 
-// Org is a single organization's collection of objects.
+// Org is a handle to a single organization's collection of objects. The empty
+// name addresses the global space (see Store.Global).
 type Org struct {
-	mu    sync.RWMutex
-	name  string
-	data  map[string]map[string][]byte // collection -> key -> raw JSON
-	blobs map[string][]byte            // checksum -> raw file content
+	backend Backend
+	name    string
 }
 
 // Name returns the organization name.
@@ -96,167 +94,77 @@ func (o *Org) Name() string { return o.name }
 
 // Create stores val under coll/key, returning ErrConflict if it already exists.
 func (o *Org) Create(coll, key string, val []byte) error {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if _, ok := o.data[coll][key]; ok {
-		return ErrConflict
-	}
-	o.set(coll, key, val)
-	return nil
+	return o.backend.Create(o.name, coll, key, val)
 }
 
 // Put stores val under coll/key, overwriting any existing value.
-func (o *Org) Put(coll, key string, val []byte) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.set(coll, key, val)
+func (o *Org) Put(coll, key string, val []byte) error {
+	return o.backend.Put(o.name, coll, key, val)
 }
 
-// set stores a defensive copy of val. Caller must hold the write lock.
-func (o *Org) set(coll, key string, val []byte) {
-	if o.data[coll] == nil {
-		o.data[coll] = make(map[string][]byte)
-	}
-	cp := make([]byte, len(val))
-	copy(cp, val)
-	o.data[coll][key] = cp
+// Get returns the value at coll/key. The returned slice is the caller's to keep.
+func (o *Org) Get(coll, key string) ([]byte, bool, error) {
+	return o.backend.Get(o.name, coll, key)
 }
 
-// Get returns a copy of the value at coll/key.
-func (o *Org) Get(coll, key string) ([]byte, bool) {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	val, ok := o.data[coll][key]
-	if !ok {
-		return nil, false
-	}
-	cp := make([]byte, len(val))
-	copy(cp, val)
-	return cp, true
+// View returns the value at coll/key. It is retained for callers on read paths
+// that previously used a zero-copy read; with the pluggable backend it returns an
+// owned copy just like Get (the no-copy optimization is internal to the memory
+// backend's Range). Callers must still treat the result as read-only.
+func (o *Org) View(coll, key string) ([]byte, bool, error) {
+	return o.backend.Get(o.name, coll, key)
 }
 
-// View returns the stored value at coll/key without copying it. Stored values
-// are never mutated in place (set always writes a fresh slice), so the returned
-// slice is safe to read concurrently — but callers MUST treat it as read-only
-// and never mutate or retain it past the point another goroutine could replace
-// it. Use this on hot read paths (search scans, list endpoints, signature key
-// lookups, file-store reads) that only unmarshal, hash, or write the bytes; use
-// Get when the caller needs an owned copy.
-func (o *Org) View(coll, key string) ([]byte, bool) {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	val, ok := o.data[coll][key]
-	return val, ok
-}
-
-// Range calls fn for each key/value in coll, in unspecified order, while
-// holding the read lock for the whole iteration — one lock acquisition instead
-// of the Keys()+per-key-Get pattern's N+1. The raw slice passed to fn is the
-// stored backing slice (read-only, like View): fn must not mutate or retain it,
-// and must not call back into a mutating store method (it would deadlock on the
-// held lock). Returning false from fn stops iteration early. Callers that need
-// sorted order must sort the values they collect.
-func (o *Org) Range(coll string, fn func(key string, raw []byte) bool) {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	for k, v := range o.data[coll] {
-		if !fn(k, v) {
-			return
-		}
-	}
+// Range calls fn for each key/value in coll. The raw slice passed to fn is
+// read-only and valid only for the duration of the call: fn must not mutate or
+// retain it, and must not call back into a mutating store method. Returning false
+// from fn stops iteration early. Callers that need sorted order must sort the
+// values they collect.
+func (o *Org) Range(coll string, fn func(key string, raw []byte) bool) error {
+	return o.backend.Range(o.name, coll, fn)
 }
 
 // Delete removes coll/key, returning the removed value and whether it existed.
-func (o *Org) Delete(coll, key string) ([]byte, bool) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	val, ok := o.data[coll][key]
-	if !ok {
-		return nil, false
-	}
-	delete(o.data[coll], key)
-	return val, true
+func (o *Org) Delete(coll, key string) ([]byte, bool, error) {
+	return o.backend.Delete(o.name, coll, key)
 }
 
 // Keys returns the sorted keys in a collection.
-func (o *Org) Keys(coll string) []string {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	keys := make([]string, 0, len(o.data[coll]))
-	for k := range o.data[coll] {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
+func (o *Org) Keys(coll string) ([]string, error) {
+	return o.backend.Keys(o.name, coll)
 }
 
 // PutBlob stores raw file content keyed by its checksum (hex MD5). The Chef
 // cookbook upload flow uploads file bodies here before a cookbook manifest
 // referencing those checksums is created.
-func (o *Org) PutBlob(checksum string, data []byte) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if o.blobs == nil {
-		o.blobs = make(map[string][]byte)
-	}
-	cp := make([]byte, len(data))
-	copy(cp, data)
-	o.blobs[checksum] = cp
+func (o *Org) PutBlob(checksum string, data []byte) error {
+	return o.backend.PutBlob(o.name, checksum, data)
 }
 
-// Blob returns a copy of the blob stored under checksum and whether it exists.
-func (o *Org) Blob(checksum string) ([]byte, bool) {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	val, ok := o.blobs[checksum]
-	if !ok {
-		return nil, false
-	}
-	cp := make([]byte, len(val))
-	copy(cp, val)
-	return cp, true
+// Blob returns the blob stored under checksum and whether it exists.
+func (o *Org) Blob(checksum string) ([]byte, bool, error) {
+	return o.backend.Blob(o.name, checksum)
 }
 
-// BlobView returns the stored blob without copying it, for read-only callers
-// such as the cookbook file-store download path that only write the bytes to a
-// response. Like View, the returned slice MUST be treated as read-only. Blobs
-// are never mutated in place (PutBlob always stores a fresh copy), so the slice
-// is safe to read after the lock is released. Use Blob when an owned copy is
-// needed.
-func (o *Org) BlobView(checksum string) ([]byte, bool) {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	val, ok := o.blobs[checksum]
-	return val, ok
+// BlobView returns the blob stored under checksum. Like View it now returns an
+// owned copy; callers must treat it as read-only.
+func (o *Org) BlobView(checksum string) ([]byte, bool, error) {
+	return o.backend.Blob(o.name, checksum)
 }
 
 // HasBlob reports whether a blob with the given checksum has been uploaded.
-func (o *Org) HasBlob(checksum string) bool {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	_, ok := o.blobs[checksum]
-	return ok
+func (o *Org) HasBlob(checksum string) (bool, error) {
+	return o.backend.HasBlob(o.name, checksum)
 }
 
 // DeleteBlob removes the blob stored under checksum, if any. It is used to
 // garbage-collect file-store content no longer referenced by any cookbook or
 // cookbook_artifact manifest.
-func (o *Org) DeleteBlob(checksum string) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	delete(o.blobs, checksum)
+func (o *Org) DeleteBlob(checksum string) error {
+	return o.backend.DeleteBlob(o.name, checksum)
 }
 
 // Collections returns the sorted collection names that contain at least one key.
-func (o *Org) Collections() []string {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	colls := make([]string, 0, len(o.data))
-	for c, m := range o.data {
-		if len(m) > 0 {
-			colls = append(colls, c)
-		}
-	}
-	sort.Strings(colls)
-	return colls
+func (o *Org) Collections() ([]string, error) {
+	return o.backend.Collections(o.name)
 }

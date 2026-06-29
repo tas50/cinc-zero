@@ -29,12 +29,18 @@ func TestLoadStashesUserPassword(t *testing.T) {
 		t.Fatalf("load: %v", err)
 	}
 
-	pw, ok := st.Global().Get(api.PasswordsCollection, "dana")
+	pw, ok, err := st.Global().Get(api.PasswordsCollection, "dana")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok || string(pw) != "d4na" {
 		t.Fatalf("password not stashed: ok=%v pw=%q", ok, pw)
 	}
 
-	raw, ok := st.Global().Get("users", "dana")
+	raw, ok, err := st.Global().Get("users", "dana")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("user not stored")
 	}

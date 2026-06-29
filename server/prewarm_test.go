@@ -8,14 +8,24 @@ import "testing"
 func TestNewDoesNotPersistPrewarmState(t *testing.T) {
 	for _, auth := range []bool{false, true} {
 		s := startServer(t, Options{Orgs: []string{"acme"}, DisableAuth: !auth})
-		org, ok := s.Store().Org("acme")
+		org, ok, err := s.Store().Org("acme")
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !ok {
 			t.Fatal("org acme missing")
 		}
-		if nodes := org.Keys("nodes"); len(nodes) != 0 {
+		nodes, err := org.Keys("nodes")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(nodes) != 0 {
 			t.Fatalf("auth=%v: pre-warm persisted nodes: %v", auth, nodes)
 		}
-		clients := org.Keys("clients")
+		clients, err := org.Keys("clients")
+		if err != nil {
+			t.Fatal(err)
+		}
 		if len(clients) != 1 || clients[0] != "acme-validator" {
 			t.Fatalf("auth=%v: unexpected clients after pre-warm: %v", auth, clients)
 		}

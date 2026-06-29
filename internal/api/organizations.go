@@ -48,14 +48,18 @@ func CreateOrganizationWithKey(st *store.Store, name, fullName string, key *rsa.
 	if err != nil {
 		return nil, err
 	}
-	SeedOrg(org)
+	if err := SeedOrg(org); err != nil {
+		return nil, err
+	}
 
 	guid, err := randomGUID()
 	if err != nil {
 		return nil, err
 	}
 	meta := map[string]any{"name": name, "full_name": fullName, "guid": guid}
-	st.Global().Put(orgsColl, name, mustEncode(meta))
+	if err := st.Global().Put(orgsColl, name, mustEncode(meta)); err != nil {
+		return nil, err
+	}
 
 	pubPEM, err := auth.EncodePublicKeyPEM(&key.PublicKey)
 	if err != nil {
@@ -64,7 +68,9 @@ func CreateOrganizationWithKey(st *store.Store, name, fullName string, key *rsa.
 	validator := name + "-validator"
 	clientDoc := fmt.Sprintf(`{"name":%q,"clientname":%q,"validator":true,"public_key":%q}`,
 		validator, validator, string(pubPEM))
-	org.Put("clients", validator, []byte(clientDoc))
+	if err := org.Put("clients", validator, []byte(clientDoc)); err != nil {
+		return nil, err
+	}
 
 	// Grant the validator create on the clients container, mirroring a real
 	// org where the validator key can register new clients/nodes. This is
@@ -72,7 +78,9 @@ func CreateOrganizationWithKey(st *store.Store, name, fullName string, key *rsa.
 	// freshly bootstrapped org behave like a real one.
 	clientsACL := defaultACL()
 	clientsACL["create"] = map[string]any{"actors": []string{validator}, "groups": []string{"admins", "users"}}
-	org.Put("acls", aclKey("containers", "clients"), mustEncode(clientsACL))
+	if err := org.Put("acls", aclKey("containers", "clients"), mustEncode(clientsACL)); err != nil {
+		return nil, err
+	}
 
 	return auth.EncodePrivateKeyPEM(key), nil
 }
@@ -87,7 +95,12 @@ func randomGUID() (string, error) {
 
 func (a *API) listOrganizations(w http.ResponseWriter, r *http.Request) {
 	out := map[string]string{}
-	for _, name := range a.store.Global().Keys(orgsColl) {
+	names, err := a.store.Global().Keys(orgsColl)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for _, name := range names {
 		out[name] = requestBaseURL(r) + "/organizations/" + name
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -123,7 +136,11 @@ func (a *API) createOrganization(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) getOrganization(w http.ResponseWriter, r *http.Request) {
-	raw, ok := a.store.Global().Get(orgsColl, r.PathValue("org"))
+	raw, ok, err := a.store.Global().Get(orgsColl, r.PathValue("org"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find org "+r.PathValue("org"))
 		return
@@ -133,7 +150,11 @@ func (a *API) getOrganization(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) putOrganization(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("org")
-	raw, ok := a.store.Global().Get(orgsColl, name)
+	raw, ok, err := a.store.Global().Get(orgsColl, name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find org "+name)
 		return
@@ -150,17 +171,27 @@ func (a *API) putOrganization(w http.ResponseWriter, r *http.Request) {
 		meta["full_name"] = fn
 	}
 	encoded := mustEncode(meta)
-	a.store.Global().Put(orgsColl, name, encoded)
+	if err := a.store.Global().Put(orgsColl, name, encoded); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeRaw(w, http.StatusOK, encoded)
 }
 
 func (a *API) deleteOrganization(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("org")
-	raw, ok := a.store.Global().Delete(orgsColl, name)
+	raw, ok, err := a.store.Global().Delete(orgsColl, name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find org "+name)
 		return
 	}
-	a.store.DeleteOrg(name)
+	if _, err := a.store.DeleteOrg(name); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeRaw(w, http.StatusOK, raw)
 }

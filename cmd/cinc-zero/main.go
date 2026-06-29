@@ -41,6 +41,8 @@ type cliFlags struct {
 	repo        string
 	state       string
 	webuiKey    string
+	storage     string
+	db          string
 }
 
 // hiddenFlags are registered and functional but omitted from usage/help output
@@ -63,6 +65,8 @@ func parseFlags(args []string, out io.Writer) (*cliFlags, error) {
 	fs.StringVar(&f.repo, "repo", "", "path to a chef-repo to load into the first org at startup")
 	fs.StringVar(&f.state, "state", "", "path to a full server-state directory to load at startup")
 	fs.StringVar(&f.webuiKey, "webui-key", "", "path to a webui public/private key for X-Ops-Request-Source: web impersonation (defaults to the admin key)")
+	fs.StringVar(&f.storage, "storage", envOr("CINC_ZERO_STORAGE", "memory"), "storage backend: memory (ephemeral) or sqlite (durable)")
+	fs.StringVar(&f.db, "db", os.Getenv("CINC_ZERO_DB"), "sqlite database file path (required when --storage sqlite)")
 
 	fs.Usage = func() {
 		fmt.Fprintf(out, "Usage of cinc-zero:\n")
@@ -119,6 +123,8 @@ func run(args []string, out io.Writer) error {
 		Repo:        f.repo,
 		StatePath:   f.state,
 		WebUIKey:    webuiKey,
+		Storage:     f.storage,
+		DB:          f.db,
 	})
 	if err != nil {
 		return err
@@ -136,6 +142,11 @@ func run(args []string, out io.Writer) error {
 	fmt.Fprintf(out, "cinc-zero listening on %s\n", srv.URL())
 	fmt.Fprintf(out, "  orgs: %s\n  admin user: %s (auth %s, acl-enforcement %s)\n",
 		f.orgsCSV, srv.AdminName(), authState(f.noAuth), enforceState(f.enforceACLs))
+	if f.storage == "sqlite" {
+		fmt.Fprintf(out, "  storage: sqlite (%s)\n", f.db)
+	} else {
+		fmt.Fprintf(out, "  storage: memory (ephemeral)\n")
+	}
 	if f.repo != "" {
 		fmt.Fprintf(out, "  loaded chef-repo from %s\n", f.repo)
 	}
@@ -156,6 +167,15 @@ func run(args []string, out io.Writer) error {
 
 	fmt.Fprintln(out, "shutting down...")
 	return srv.Stop(context.Background())
+}
+
+// envOr returns the value of environment variable key, or def when it is unset
+// or empty. It lets storage flags default from CINC_ZERO_* (handy in containers).
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }
 
 func splitCSV(s string) []string {

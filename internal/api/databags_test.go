@@ -99,8 +99,15 @@ func TestDataBagDeleteRemovesItems(t *testing.T) {
 	if resp.StatusCode != 404 {
 		t.Fatalf("get deleted bag = %d", resp.StatusCode)
 	}
-	org, _ := st.Org("acme")
-	if len(org.Keys("databag_items:secrets")) != 0 {
+	org, _, err := st.Org("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, err := org.Keys("databag_items:secrets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 0 {
 		t.Fatal("items not removed with bag")
 	}
 }

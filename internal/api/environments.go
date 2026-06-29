@@ -12,11 +12,17 @@ const defaultEnvironment = `{"name":"_default","description":"The default Chef e
 // SeedOrg initializes a newly created organization with the objects Chef
 // guarantees to exist: the _default environment. (Default authz groups and
 // containers are added as those subsystems land.)
-func SeedOrg(org *store.Org) {
-	if _, ok := org.Get("environments", "_default"); !ok {
-		org.Put("environments", "_default", []byte(defaultEnvironment))
+func SeedOrg(org *store.Org) error {
+	_, ok, err := org.Get("environments", "_default")
+	if err != nil {
+		return err
 	}
-	seedAuthz(org)
+	if !ok {
+		if err := org.Put("environments", "_default", []byte(defaultEnvironment)); err != nil {
+			return err
+		}
+	}
+	return seedAuthz(org)
 }
 
 // registerEnvironmentRoutes wires environments using the generic object CRUD

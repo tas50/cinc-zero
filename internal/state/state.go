@@ -90,13 +90,20 @@ func Load(st *store.Store, root string) (*Summary, error) {
 // orgOrCreate returns the existing org, or creates it (with its _default
 // environment, validator client, and default groups/ACLs) if absent.
 func orgOrCreate(st *store.Store, name string) (*store.Org, error) {
-	if org, ok := st.Org(name); ok {
+	org, ok, err := st.Org(name)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
 		return org, nil
 	}
 	if _, err := api.CreateOrganization(st, name, name); err != nil {
 		return nil, fmt.Errorf("create org %q: %w", name, err)
 	}
-	org, _ := st.Org(name)
+	org, _, err = st.Org(name)
+	if err != nil {
+		return nil, err
+	}
 	return org, nil
 }
 
@@ -116,12 +123,18 @@ func loadGlobalUsers(st *store.Store, dir string) (int, error) {
 		name := objectKey(obj, "username", path)
 		// Mirror POST /users: a "password" field is moved out-of-band into the
 		// passwords collection and stripped from the stored (and returned) user.
-		if api.StashPassword(st.Global(), name, obj) {
+		stashed, err := api.StashPassword(st.Global(), name, obj)
+		if err != nil {
+			return 0, err
+		}
+		if stashed {
 			if raw, err = json.Marshal(obj); err != nil {
 				return 0, fmt.Errorf("%s: %w", path, err)
 			}
 		}
-		st.Global().Put("users", name, raw)
+		if err := st.Global().Put("users", name, raw); err != nil {
+			return 0, err
+		}
 		count++
 	}
 	return count, nil
@@ -141,7 +154,9 @@ func loadGroups(org *store.Org, dir string) (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		org.Put("groups", objectKey(obj, "groupname", path), raw)
+		if err := org.Put("groups", objectKey(obj, "groupname", path), raw); err != nil {
+			return 0, err
+		}
 		count++
 	}
 	return count, nil
@@ -169,7 +184,9 @@ func loadMembers(org *store.Org, path string) error {
 			return fmt.Errorf("%s: member entry has no username", path)
 		}
 		val, _ := json.Marshal(map[string]any{"username": name})
-		org.Put(api.AssociationUsersCollection, name, val)
+		if err := org.Put(api.AssociationUsersCollection, name, val); err != nil {
+			return err
+		}
 	}
 	return nil
 }

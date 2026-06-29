@@ -41,8 +41,8 @@ func ohaiUptime(seconds int64) string {
 func TestSeedNodeUptime(t *testing.T) {
 	_, org, _ := loadSeed(t)
 
-	for _, name := range org.Keys("nodes") {
-		raw, _ := org.Get("nodes", name)
+	for _, name := range mustKeys(t, org, "nodes") {
+		raw, _ := mustGet(t, org, "nodes", name)
 		var node struct {
 			Automatic struct {
 				Uptime        string `json:"uptime"`
@@ -71,8 +71,8 @@ func TestSeedNodeUptime(t *testing.T) {
 func TestSeedNodesHaveRichOhai(t *testing.T) {
 	_, org, _ := loadSeed(t)
 
-	for _, name := range org.Keys("nodes") {
-		raw, _ := org.Get("nodes", name)
+	for _, name := range mustKeys(t, org, "nodes") {
+		raw, _ := mustGet(t, org, "nodes", name)
 		var node struct {
 			Automatic struct {
 				IPAddress  string          `json:"ipaddress"`
@@ -116,11 +116,35 @@ func loadSeed(t *testing.T) (*store.Store, *store.Org, *Summary) {
 	if err != nil {
 		t.Fatalf("load %s: %v", seedDir, err)
 	}
-	org, ok := st.Org("acme")
+	org, ok, err := st.Org("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("seed did not create org acme")
 	}
 	return st, org, sum
+}
+
+// mustKeys returns org.Keys(coll), failing the test on error.
+func mustKeys(t *testing.T, org *store.Org, coll string) []string {
+	t.Helper()
+	keys, err := org.Keys(coll)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return keys
+}
+
+// mustGet returns the value and presence flag from org.Get(coll, key), failing
+// the test on error.
+func mustGet(t *testing.T, org *store.Org, coll, key string) ([]byte, bool) {
+	t.Helper()
+	raw, ok, err := org.Get(coll, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw, ok
 }
 
 // TestSeedCounts pins the shape of the committed dev/test-repo: a medium,
@@ -165,11 +189,11 @@ func TestSeedDataBags(t *testing.T) {
 		"apps":    {"webapp", "api"},
 	}
 	for bag, items := range want {
-		if _, ok := org.Get("data_bags", bag); !ok {
+		if _, ok := mustGet(t, org, "data_bags", bag); !ok {
 			t.Errorf("data bag %q not loaded", bag)
 		}
 		for _, id := range items {
-			raw, ok := org.Get("databag_items:"+bag, id)
+			raw, ok := mustGet(t, org, "databag_items:"+bag, id)
 			if !ok {
 				t.Errorf("data bag %q missing item %q", bag, id)
 				continue
@@ -193,8 +217,8 @@ func TestSeedFauxhaiNodes(t *testing.T) {
 	_, org, _ := loadSeed(t)
 
 	platforms := map[string]bool{}
-	for _, name := range org.Keys("nodes") {
-		raw, _ := org.Get("nodes", name)
+	for _, name := range mustKeys(t, org, "nodes") {
+		raw, _ := mustGet(t, org, "nodes", name)
 		var node struct {
 			Automatic struct {
 				Platform        string `json:"platform"`
@@ -222,11 +246,11 @@ func TestSeedFauxhaiNodes(t *testing.T) {
 func TestSeedEnvironmentsHaveAttributesAndPins(t *testing.T) {
 	_, org, _ := loadSeed(t)
 
-	for _, name := range org.Keys("environments") {
+	for _, name := range mustKeys(t, org, "environments") {
 		if name == "_default" {
 			continue
 		}
-		raw, _ := org.Get("environments", name)
+		raw, _ := mustGet(t, org, "environments", name)
 		var env struct {
 			DefaultAttributes  map[string]json.RawMessage `json:"default_attributes"`
 			OverrideAttributes map[string]json.RawMessage `json:"override_attributes"`
@@ -252,14 +276,14 @@ func TestSeedRunListCookbooksLoaded(t *testing.T) {
 	_, org, _ := loadSeed(t)
 
 	loaded := map[string]bool{}
-	for _, key := range org.Keys("cookbooks") {
+	for _, key := range mustKeys(t, org, "cookbooks") {
 		name, _, _ := strings.Cut(key, "/")
 		loaded[name] = true
 	}
 
 	referenced := map[string]bool{}
-	for _, name := range org.Keys("roles") {
-		raw, _ := org.Get("roles", name)
+	for _, name := range mustKeys(t, org, "roles") {
+		raw, _ := mustGet(t, org, "roles", name)
 		var role struct {
 			RunList []string `json:"run_list"`
 		}
@@ -293,12 +317,12 @@ func TestSeedNoDanglingReferences(t *testing.T) {
 	_, org, _ := loadSeed(t)
 
 	has := func(coll, key string) bool {
-		_, ok := org.Get(coll, key)
+		_, ok := mustGet(t, org, coll, key)
 		return ok
 	}
 
-	for _, name := range org.Keys("nodes") {
-		raw, _ := org.Get("nodes", name)
+	for _, name := range mustKeys(t, org, "nodes") {
+		raw, _ := mustGet(t, org, "nodes", name)
 		var node struct {
 			ChefEnvironment string   `json:"chef_environment"`
 			RunList         []string `json:"run_list"`
@@ -325,7 +349,7 @@ func TestSeedNoDanglingReferences(t *testing.T) {
 				t.Errorf("node %s references missing policy_group %q", name, node.PolicyGroup)
 				continue
 			}
-			groupRaw, _ := org.Get("policy_groups", node.PolicyGroup)
+			groupRaw, _ := mustGet(t, org, "policy_groups", node.PolicyGroup)
 			var group struct {
 				Policies map[string]struct {
 					RevisionID string `json:"revision_id"`
@@ -370,12 +394,12 @@ type nodeAutomatic struct {
 func TestSeedChefClientVersions(t *testing.T) {
 	_, org, _ := loadSeed(t)
 
-	names := org.Keys("nodes")
+	names := mustKeys(t, org, "nodes")
 	total := len(names)
 	current := 0
 	old := map[string]int{}
 	for _, name := range names {
-		raw, _ := org.Get("nodes", name)
+		raw, _ := mustGet(t, org, "nodes", name)
 		var node nodeAutomatic
 		if err := json.Unmarshal(raw, &node); err != nil {
 			t.Fatalf("node %s: %v", name, err)
@@ -414,8 +438,8 @@ func TestSeedBareNodes(t *testing.T) {
 	_, org, _ := loadSeed(t)
 
 	bare := 0
-	for _, name := range org.Keys("nodes") {
-		raw, _ := org.Get("nodes", name)
+	for _, name := range mustKeys(t, org, "nodes") {
+		raw, _ := mustGet(t, org, "nodes", name)
 		var node struct {
 			RunList     []string `json:"run_list"`
 			PolicyName  string   `json:"policy_name"`
@@ -448,8 +472,8 @@ func TestSeedRecentSplayedCheckins(t *testing.T) {
 	var min, max float64
 	distinct := map[float64]bool{}
 	first := true
-	for _, name := range org.Keys("nodes") {
-		raw, _ := org.Get("nodes", name)
+	for _, name := range mustKeys(t, org, "nodes") {
+		raw, _ := mustGet(t, org, "nodes", name)
 		var node nodeAutomatic
 		if err := json.Unmarshal(raw, &node); err != nil {
 			t.Fatalf("node %s: %v", name, err)

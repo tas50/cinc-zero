@@ -115,9 +115,14 @@ func benchSearchOrg(b *testing.B, n int) (*API, *store.Org, searchIndex, search.
 			`"automatic":{"os":"linux","memory":{"total":"16gb"},`+
 			`"network":{"interfaces":{"eth0":{"addr":"10.0.0.%d"}}}},`+
 			`"run_list":["recipe[nginx]","recipe[base]"]}`, i, i, i%256)
-		org.Put("nodes", fmt.Sprintf("node%d", i), []byte(doc))
+		if err := org.Put("nodes", fmt.Sprintf("node%d", i), []byte(doc)); err != nil {
+			b.Fatal(err)
+		}
 	}
-	idx, _ := a.resolveIndex(nil, org, "node")
+	idx, _, err := a.resolveIndex(nil, org, "node")
+	if err != nil {
+		b.Fatal(err)
+	}
 	q, err := search.Parse("chef_environment:production")
 	if err != nil {
 		b.Fatal(err)
@@ -133,7 +138,9 @@ func BenchmarkSearchScanCold(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		a.search = newSearchCache() // force a full recompute each iteration
-		a.collectMatches(org, idx, q)
+		if _, err := a.collectMatches(org, idx, q); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -141,10 +148,14 @@ func BenchmarkSearchScanCold(b *testing.B) {
 // cache — the steady-state cost of repeated queries over unchanged objects.
 func BenchmarkSearchScanWarm(b *testing.B) {
 	a, org, idx, q := benchSearchOrg(b, 200)
-	a.collectMatches(org, idx, q) // warm the cache
+	if _, err := a.collectMatches(org, idx, q); err != nil { // warm the cache
+		b.Fatal(err)
+	}
 	b.ReportAllocs()
 	for b.Loop() {
-		a.collectMatches(org, idx, q)
+		if _, err := a.collectMatches(org, idx, q); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -156,8 +167,13 @@ func TestSearchDocCachesUnchangedContent(t *testing.T) {
 	st := store.New()
 	org, _ := st.CreateOrg("acme")
 	a := New(st)
-	org.Put("nodes", "web", []byte(`{"name":"web","normal":{"foo":"bar"}}`))
-	raw, _ := org.View("nodes", "web")
+	if err := org.Put("nodes", "web", []byte(`{"name":"web","normal":{"foo":"bar"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	raw, _, err := org.View("nodes", "web")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	_, f1, ok1 := a.searchDoc("nodes", "web", raw, true)
 	_, f2, ok2 := a.searchDoc("nodes", "web", raw, true)
@@ -177,13 +193,23 @@ func TestSearchDocRecomputesAfterContentChange(t *testing.T) {
 	st := store.New()
 	org, _ := st.CreateOrg("acme")
 	a := New(st)
-	org.Put("nodes", "web", []byte(`{"name":"web","normal":{"foo":"bar"}}`))
-	raw1, _ := org.View("nodes", "web")
+	if err := org.Put("nodes", "web", []byte(`{"name":"web","normal":{"foo":"bar"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	raw1, _, err := org.View("nodes", "web")
+	if err != nil {
+		t.Fatal(err)
+	}
 	_, f1, _ := a.searchDoc("nodes", "web", raw1, true)
 
 	// Updating the node replaces the stored slice, so the cache must recompute.
-	org.Put("nodes", "web", []byte(`{"name":"web","normal":{"foo":"changed"}}`))
-	raw2, _ := org.View("nodes", "web")
+	if err := org.Put("nodes", "web", []byte(`{"name":"web","normal":{"foo":"changed"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	raw2, _, err := org.View("nodes", "web")
+	if err != nil {
+		t.Fatal(err)
+	}
 	_, f2, ok := a.searchDoc("nodes", "web", raw2, true)
 	if !ok {
 		t.Fatal("searchDoc returned not-ok after update")
@@ -208,8 +234,14 @@ func TestSearchDocConcurrentAccess(t *testing.T) {
 	raws := make([][]byte, nodes)
 	for i := range nodes {
 		id := fmt.Sprintf("node%d", i)
-		org.Put("nodes", id, []byte(fmt.Sprintf(`{"name":%q,"normal":{"idx":%d}}`, id, i)))
-		raws[i], _ = org.View("nodes", id)
+		if err := org.Put("nodes", id, []byte(fmt.Sprintf(`{"name":%q,"normal":{"idx":%d}}`, id, i))); err != nil {
+			t.Fatal(err)
+		}
+		raw, _, err := org.View("nodes", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raws[i] = raw
 	}
 
 	var wg sync.WaitGroup
@@ -234,8 +266,13 @@ func TestSearchDocReportsNotOKForInvalidJSON(t *testing.T) {
 	st := store.New()
 	org, _ := st.CreateOrg("acme")
 	a := New(st)
-	org.Put("nodes", "broken", []byte(`not json`))
-	raw, _ := org.View("nodes", "broken")
+	if err := org.Put("nodes", "broken", []byte(`not json`)); err != nil {
+		t.Fatal(err)
+	}
+	raw, _, err := org.View("nodes", "broken")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, _, ok := a.searchDoc("nodes", "broken", raw, false); ok {
 		t.Fatal("searchDoc should report not-ok for undecodable JSON")
 	}

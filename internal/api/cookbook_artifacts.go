@@ -25,9 +25,13 @@ func (a *API) registerCookbookArtifactRoutes(mux *http.ServeMux) {
 
 // artifactIdentifiers returns name -> identifiers (sorted), since artifact
 // identifiers are opaque hashes with no meaningful version ordering.
-func artifactIdentifiers(org *store.Org) map[string][]string {
+func artifactIdentifiers(org *store.Org) (map[string][]string, error) {
 	out := map[string][]string{}
-	for _, key := range org.Keys("cookbook_artifacts") {
+	keys, err := org.Keys("cookbook_artifacts")
+	if err != nil {
+		return nil, err
+	}
+	for _, key := range keys {
 		name, ident, ok := strings.Cut(key, "/")
 		if !ok {
 			continue
@@ -37,7 +41,7 @@ func artifactIdentifiers(org *store.Org) map[string][]string {
 	for _, idents := range out {
 		sort.Strings(idents)
 	}
-	return out
+	return out, nil
 }
 
 func (a *API) listArtifacts(w http.ResponseWriter, r *http.Request) {
@@ -45,7 +49,12 @@ func (a *API) listArtifacts(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	writeJSON(w, http.StatusOK, collectionListBody(r, org, "cookbook_artifacts", "identifier", artifactIdentifiers(org)))
+	idents, err := artifactIdentifiers(org)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, collectionListBody(r, org, "cookbook_artifacts", "identifier", idents))
 }
 
 func (a *API) getArtifact(w http.ResponseWriter, r *http.Request) {
@@ -54,7 +63,12 @@ func (a *API) getArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	idents, ok := artifactIdentifiers(org)[name]
+	all, err := artifactIdentifiers(org)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	idents, ok := all[name]
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find a cookbook artifact named "+name)
 		return
@@ -68,7 +82,11 @@ func (a *API) getArtifactVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name, ident := r.PathValue("name"), r.PathValue("identifier")
-	raw, ok := org.Get("cookbook_artifacts", cookbookKey(name, ident))
+	raw, ok, err := org.Get("cookbook_artifacts", cookbookKey(name, ident))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find a cookbook artifact named "+name+" with identifier "+ident)
 		return
@@ -91,7 +109,10 @@ func (a *API) putArtifactVersion(w http.ResponseWriter, r *http.Request) {
 
 	// Artifacts are content-addressed and immutable: an existing identifier is
 	// never overwritten.
-	if _, existed := org.Get("cookbook_artifacts", cookbookKey(name, ident)); existed {
+	if _, existed, err := org.Get("cookbook_artifacts", cookbookKey(name, ident)); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if existed {
 		writeError(w, http.StatusConflict,
 			"Cookbook artifact "+name+" with identifier "+ident+" already exists")
 		return
@@ -103,12 +124,20 @@ func (a *API) putArtifactVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, sum := range manifestChecksums(m) {
-		if !org.HasBlob(sum) {
+		has, err := org.HasBlob(sum)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !has {
 			writeError(w, http.StatusBadRequest, "Manifest has a checksum that hasn't been uploaded: "+sum)
 			return
 		}
 	}
-	org.Put("cookbook_artifacts", cookbookKey(name, ident), mustEncode(m))
+	if err := org.Put("cookbook_artifacts", cookbookKey(name, ident), mustEncode(m)); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	injectFileURLs(m, r, org.Name())
 	writeJSON(w, http.StatusCreated, m)
@@ -120,14 +149,21 @@ func (a *API) deleteArtifactVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name, ident := r.PathValue("name"), r.PathValue("identifier")
-	raw, ok := org.Delete("cookbook_artifacts", cookbookKey(name, ident))
+	raw, ok, err := org.Delete("cookbook_artifacts", cookbookKey(name, ident))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find a cookbook artifact named "+name+" with identifier "+ident)
 		return
 	}
 	var m map[string]any
 	if json.Unmarshal(raw, &m) == nil {
-		gcOrphanedBlobs(org, manifestChecksums(m))
+		if err := gcOrphanedBlobs(org, manifestChecksums(m)); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		injectFileURLs(m, r, org.Name())
 		writeJSON(w, http.StatusOK, m)
 		return

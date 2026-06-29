@@ -31,8 +31,14 @@ func TestClientCreateGeneratesKey(t *testing.T) {
 	}
 
 	// The stored client retains the public key but never the private key.
-	org, _ := st.Org("acme")
-	raw, ok := org.Get("clients", "node1")
+	org, _, err := st.Org("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, ok, err := org.Get("clients", "node1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("client not stored")
 	}
@@ -57,8 +63,14 @@ func TestClientCreateAcceptsProvidedKey(t *testing.T) {
 	if resp.StatusCode != 201 {
 		t.Fatalf("create status %d: %s", resp.StatusCode, body)
 	}
-	org, _ := st.Org("acme")
-	raw, _ := org.Get("clients", "node2")
+	org, _, err := st.Org("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _, err := org.Get("clients", "node2")
+	if err != nil {
+		t.Fatal(err)
+	}
 	var stored map[string]any
 	json.Unmarshal(raw, &stored)
 	if stored["public_key"] != string(pub) {
@@ -88,8 +100,14 @@ func TestClientCreateAcceptsNestedPublicKey(t *testing.T) {
 	if privateKeyFrom(t, out) != "" {
 		t.Fatalf("server generated a key despite a supplied public key: %s", body)
 	}
-	org, _ := st.Org("acme")
-	raw, _ := org.Get("clients", "byo")
+	org, _, err := st.Org("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _, err := org.Get("clients", "byo")
+	if err != nil {
+		t.Fatal(err)
+	}
 	var stored map[string]any
 	json.Unmarshal(raw, &stored)
 	if stored["public_key"] != string(pub) {
@@ -106,7 +124,11 @@ func TestUserCreateIsGlobal(t *testing.T) {
 	if resp.StatusCode != 201 {
 		t.Fatalf("create user status %d: %s", resp.StatusCode, body)
 	}
-	if _, ok := st.Global().Get("users", "alice"); !ok {
+	_, ok, err := st.Global().Get("users", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
 		t.Fatal("user not stored in global space")
 	}
 	// Listing users does not require an org.

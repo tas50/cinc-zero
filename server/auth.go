@@ -51,7 +51,11 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 				unauthorized(w, "Invalid webui signature for request source 'web'")
 				return
 			}
-			_, actor, ok := s.resolveAuth(r.URL.Path, parsed.UserID)
+			_, actor, ok, err := s.resolveAuth(r.URL.Path, parsed.UserID)
+			if err != nil {
+				serverError(w, err)
+				return
+			}
 			if !ok {
 				unauthorized(w, "Failed to authenticate as '"+parsed.UserID+"' via the web UI. Ensure the user exists.")
 				return
@@ -68,7 +72,11 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 
 		// One lookup resolves both the signing key and the actor identity from a
 		// single store read of the actor's record.
-		pub, actor, ok := s.resolveAuth(r.URL.Path, parsed.UserID)
+		pub, actor, ok, err := s.resolveAuth(r.URL.Path, parsed.UserID)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
 		if !ok {
 			unauthorized(w, "Failed to authenticate as '"+parsed.UserID+"'. Ensure that your node_name and client key are correct.")
 			return
@@ -96,18 +104,30 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 // org), then global users, mirroring Chef's resolution order. The actor records
 // whether it is an org client (vs. a global user) and whether a global user is
 // an admin (Chef's pivotal superuser, which bypasses ACLs).
-func (s *Server) resolveAuth(path, name string) (*rsa.PublicKey, api.Actor, bool) {
+func (s *Server) resolveAuth(path, name string) (*rsa.PublicKey, api.Actor, bool, error) {
 	if org := orgFromPath(path); org != "" {
-		if o, ok := s.store.Org(org); ok {
-			if pub, _, ok := s.parseActorRecord(o, "clients", name); ok {
-				return pub, api.Actor{Name: name, IsClient: true}, true
+		o, ok, err := s.store.Org(org)
+		if err != nil {
+			return nil, api.Actor{}, false, err
+		}
+		if ok {
+			pub, _, ok, err := s.parseActorRecord(o, "clients", name)
+			if err != nil {
+				return nil, api.Actor{}, false, err
+			}
+			if ok {
+				return pub, api.Actor{Name: name, IsClient: true}, true, nil
 			}
 		}
 	}
-	if pub, admin, ok := s.parseActorRecord(s.store.Global(), "users", name); ok {
-		return pub, api.Actor{Name: name, IsGlobalAdmin: admin}, true
+	pub, admin, ok, err := s.parseActorRecord(s.store.Global(), "users", name)
+	if err != nil {
+		return nil, api.Actor{}, false, err
 	}
-	return nil, api.Actor{}, false
+	if ok {
+		return pub, api.Actor{Name: name, IsGlobalAdmin: admin}, true, nil
+	}
+	return nil, api.Actor{}, false, nil
 }
 
 // parseWebUIKey accepts a PEM-encoded RSA public or private key and returns the
@@ -127,23 +147,26 @@ func parseWebUIKey(pemBytes []byte) (*rsa.PublicKey, error) {
 // its RSA public key (parsed through the server's key cache to avoid re-parsing
 // PEM/x509 on every request) and its admin flag. The record is read copy-free
 // since it is only unmarshalled here.
-func (s *Server) parseActorRecord(org *store.Org, collection, name string) (pub *rsa.PublicKey, admin, ok bool) {
-	raw, found := org.View(collection, name)
+func (s *Server) parseActorRecord(org *store.Org, collection, name string) (pub *rsa.PublicKey, admin, ok bool, err error) {
+	raw, found, err := org.View(collection, name)
+	if err != nil {
+		return nil, false, false, err
+	}
 	if !found {
-		return nil, false, false
+		return nil, false, false, nil
 	}
 	var rec struct {
 		PublicKey string `json:"public_key"`
 		Admin     bool   `json:"admin"`
 	}
 	if err := json.Unmarshal(raw, &rec); err != nil || rec.PublicKey == "" {
-		return nil, false, false
+		return nil, false, false, nil
 	}
 	key, err := s.keyCache.Parse(rec.PublicKey)
 	if err != nil {
-		return nil, false, false
+		return nil, false, false, nil
 	}
-	return key, rec.Admin, true
+	return key, rec.Admin, true, nil
 }
 
 // checkSkew rejects timestamps outside the allowed clock-skew window.
@@ -167,6 +190,15 @@ func unauthorized(w http.ResponseWriter, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnauthorized)
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": []string{msg}})
+}
+
+// serverError reports a backend failure (e.g. a store read error during auth
+// resolution) as a JSON 500, so a storage fault is never silently treated as an
+// authentication failure.
+func serverError(w http.ResponseWriter, err error) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusInternalServerError)
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": []string{err.Error()}})
 }
 
 // limitBody caps the request body size so a single oversized request cannot

@@ -35,7 +35,11 @@ func keysBaseURL(r *http.Request, segment, actor string) string {
 
 // loadActor fetches the actor object, writing a 404 if it does not exist.
 func loadActor(w http.ResponseWriter, org *store.Org, segment, name string) (map[string]any, bool) {
-	raw, ok := org.Get(segment, name)
+	raw, ok, err := org.Get(segment, name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return nil, false
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find "+segment+" "+name)
 		return nil, false
@@ -62,14 +66,23 @@ func (a *API) listKeys(segment string, scope scopeFunc) http.HandlerFunc {
 		coll := keysColl(segment, name)
 		base := keysBaseURL(r, segment, name)
 		var out []map[string]any
-		_, storedDefault := org.Get(coll, defaultKeyName)
+		_, storedDefault, err := org.Get(coll, defaultKeyName)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		// The synthetic default key reflects the actor's public_key.
 		if !storedDefault {
 			if pk, _ := actor["public_key"].(string); pk != "" {
 				out = append(out, keyListItem(base, defaultKeyName))
 			}
 		}
-		for _, kn := range org.Keys(coll) {
+		kns, err := org.Keys(coll)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		for _, kn := range kns {
 			out = append(out, keyListItem(base, kn))
 		}
 		writeJSON(w, http.StatusOK, out)
@@ -92,7 +105,12 @@ func (a *API) getKey(segment string, scope scopeFunc) http.HandlerFunc {
 			return
 		}
 		coll := keysColl(segment, name)
-		if raw, ok := org.Get(coll, keyName); ok {
+		raw, ok, err := org.Get(coll, keyName)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if ok {
 			writeRaw(w, http.StatusOK, raw)
 			return
 		}
@@ -161,6 +179,9 @@ func (a *API) addKey(segment string, scope scopeFunc) http.HandlerFunc {
 		if err := org.Create(keysColl(segment, name), keyName, mustEncode(stored)); errors.Is(err, store.ErrConflict) {
 			writeError(w, http.StatusConflict, "Key already exists")
 			return
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
 		}
 		writeJSON(w, http.StatusCreated, resp)
 	}
@@ -183,13 +204,20 @@ func (a *API) putKey(segment string, scope scopeFunc) http.HandlerFunc {
 			return
 		}
 		coll := keysColl(segment, name)
-		_, stored := org.Get(coll, keyName)
+		_, stored, err := org.Get(coll, keyName)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 
 		// Updating the synthetic default key rewrites the actor's public_key.
 		if keyName == defaultKeyName && !stored {
 			if pub, ok := body["public_key"].(string); ok && pub != "" {
 				actor["public_key"] = pub
-				org.Put(segment, name, mustEncode(actor))
+				if err := org.Put(segment, name, mustEncode(actor)); err != nil {
+					writeError(w, http.StatusInternalServerError, err.Error())
+					return
+				}
 			}
 			writeJSON(w, http.StatusOK, keyObject(defaultKeyName, str(actor["public_key"])))
 			return
@@ -200,7 +228,10 @@ func (a *API) putKey(segment string, scope scopeFunc) http.HandlerFunc {
 		}
 		body["name"] = keyName
 		raw := mustEncode(body)
-		org.Put(coll, keyName, raw)
+		if err := org.Put(coll, keyName, raw); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		writeRaw(w, http.StatusOK, raw)
 	}
 }
@@ -217,7 +248,12 @@ func (a *API) deleteKey(segment string, scope scopeFunc) http.HandlerFunc {
 			return
 		}
 		coll := keysColl(segment, name)
-		if raw, ok := org.Delete(coll, keyName); ok {
+		raw, ok, err := org.Delete(coll, keyName)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if ok {
 			writeRaw(w, http.StatusOK, raw)
 			return
 		}
@@ -225,7 +261,10 @@ func (a *API) deleteKey(segment string, scope scopeFunc) http.HandlerFunc {
 		if keyName == defaultKeyName {
 			if pk, _ := actor["public_key"].(string); pk != "" {
 				delete(actor, "public_key")
-				org.Put(segment, name, mustEncode(actor))
+				if err := org.Put(segment, name, mustEncode(actor)); err != nil {
+					writeError(w, http.StatusInternalServerError, err.Error())
+					return
+				}
 				writeJSON(w, http.StatusOK, keyObject(defaultKeyName, pk))
 				return
 			}

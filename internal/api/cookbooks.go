@@ -43,11 +43,20 @@ func (a *API) universe(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
+	cv, err := cookbookVersions(org)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	out := map[string]any{}
-	for name, vers := range cookbookVersions(org) {
+	for name, vers := range cv {
 		versions := map[string]any{}
 		for _, v := range vers {
-			raw, ok := org.Get("cookbooks", cookbookKey(name, v))
+			raw, ok, err := org.Get("cookbooks", cookbookKey(name, v))
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 			if !ok {
 				continue
 			}
@@ -107,7 +116,10 @@ func (a *API) putFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Checksum of uploaded content does not match "+checksum)
 		return
 	}
-	org.PutBlob(checksum, body)
+	if err := org.PutBlob(checksum, body); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -116,7 +128,11 @@ func (a *API) getFile(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	data, ok := org.BlobView(r.PathValue("checksum"))
+	data, ok, err := org.BlobView(r.PathValue("checksum"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "File not found")
 		return
@@ -155,7 +171,12 @@ func (a *API) createSandbox(w http.ResponseWriter, r *http.Request) {
 	id := sandboxID(sums)
 	out := map[string]any{}
 	for _, sum := range sums {
-		if org.HasBlob(sum) {
+		has, err := org.HasBlob(sum)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if has {
 			out[sum] = map[string]any{"needs_upload": false}
 		} else {
 			out[sum] = map[string]any{"url": fileStoreURL(r, org.Name(), sum), "needs_upload": true}
@@ -168,7 +189,10 @@ func (a *API) createSandbox(w http.ResponseWriter, r *http.Request) {
 		"is_completed": false,
 		"create_time":  time.Now().UTC().Format(time.RFC3339),
 	}
-	org.Put("sandboxes", id, mustEncode(doc))
+	if err := org.Put("sandboxes", id, mustEncode(doc)); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"sandbox_id": id,
@@ -183,7 +207,11 @@ func (a *API) commitSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	raw, ok := org.Get("sandboxes", id)
+	raw, ok, err := org.Get("sandboxes", id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find sandbox "+id)
 		return
@@ -194,7 +222,12 @@ func (a *API) commitSandbox(w http.ResponseWriter, r *http.Request) {
 	json.Unmarshal(raw, &doc)
 
 	for _, sum := range doc.Checksums {
-		if !org.HasBlob(sum) {
+		has, err := org.HasBlob(sum)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !has {
 			writeError(w, http.StatusBadRequest, "Checksum "+sum+" was not uploaded before the sandbox was committed")
 			return
 		}
@@ -206,7 +239,10 @@ func (a *API) commitSandbox(w http.ResponseWriter, r *http.Request) {
 		"checksums":    doc.Checksums,
 		"is_completed": true,
 	}
-	org.Put("sandboxes", id, mustEncode(committed))
+	if err := org.Put("sandboxes", id, mustEncode(committed)); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, committed)
 }
 
@@ -232,9 +268,13 @@ func cookbookBaseURL(r *http.Request, org, name string) string {
 }
 
 // cookbookVersions returns name -> versions (each list sorted newest first).
-func cookbookVersions(org *store.Org) map[string][]string {
+func cookbookVersions(org *store.Org) (map[string][]string, error) {
+	keys, err := org.Keys("cookbooks")
+	if err != nil {
+		return nil, err
+	}
 	out := map[string][]string{}
-	for _, key := range org.Keys("cookbooks") {
+	for _, key := range keys {
 		name, version, ok := strings.Cut(key, "/")
 		if !ok {
 			continue
@@ -244,7 +284,7 @@ func cookbookVersions(org *store.Org) map[string][]string {
 	for _, vers := range out {
 		sort.Slice(vers, func(i, j int) bool { return compareVersions(vers[i], vers[j]) > 0 })
 	}
-	return out
+	return out, nil
 }
 
 func (a *API) listCookbooks(w http.ResponseWriter, r *http.Request) {
@@ -252,22 +292,30 @@ func (a *API) listCookbooks(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	writeJSON(w, http.StatusOK, collectionListBody(r, org, "cookbooks", "version", cookbookVersions(org)))
+	cv, err := cookbookVersions(org)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, collectionListBody(r, org, "cookbooks", "version", cv))
 }
 
 // cookbookVersionsFor returns one cookbook's versions (sorted newest first)
 // without building — and sorting — the version map for every other cookbook the
 // way cookbookVersions does. Returns nil if the cookbook has no versions.
-func cookbookVersionsFor(org *store.Org, name string) []string {
+func cookbookVersionsFor(org *store.Org, name string) ([]string, error) {
 	var vers []string
-	org.Range("cookbooks", func(key string, _ []byte) bool {
+	err := org.Range("cookbooks", func(key string, _ []byte) bool {
 		if cb, version, ok := strings.Cut(key, "/"); ok && cb == name {
 			vers = append(vers, version)
 		}
 		return true
 	})
+	if err != nil {
+		return nil, err
+	}
 	sort.Slice(vers, func(i, j int) bool { return compareVersions(vers[i], vers[j]) > 0 })
-	return vers
+	return vers, nil
 }
 
 func (a *API) getCookbook(w http.ResponseWriter, r *http.Request) {
@@ -276,7 +324,11 @@ func (a *API) getCookbook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	vers := cookbookVersionsFor(org, name)
+	vers, err := cookbookVersionsFor(org, name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if len(vers) == 0 {
 		writeError(w, http.StatusNotFound, "Cannot find a cookbook named "+name)
 		return
@@ -316,15 +368,19 @@ func collectionListBody(r *http.Request, org *store.Org, segment, label string, 
 }
 
 // resolveVersion maps the "_latest" alias to the newest stored version.
-func resolveVersion(org *store.Org, name, version string) (string, bool) {
+func resolveVersion(org *store.Org, name, version string) (string, bool, error) {
 	if version != "_latest" && version != "latest" {
-		return version, true
+		return version, true, nil
 	}
-	vers := cookbookVersions(org)[name]
+	cv, err := cookbookVersions(org)
+	if err != nil {
+		return "", false, err
+	}
+	vers := cv[name]
 	if len(vers) == 0 {
-		return "", false
+		return "", false, nil
 	}
-	return vers[0], true // sorted newest first
+	return vers[0], true, nil // sorted newest first
 }
 
 func (a *API) getCookbookVersion(w http.ResponseWriter, r *http.Request) {
@@ -333,12 +389,20 @@ func (a *API) getCookbookVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	version, ok := resolveVersion(org, name, r.PathValue("version"))
+	version, ok, err := resolveVersion(org, name, r.PathValue("version"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find a cookbook named "+name)
 		return
 	}
-	raw, ok := org.Get("cookbooks", cookbookKey(name, version))
+	raw, ok, err := org.Get("cookbooks", cookbookKey(name, version))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find a cookbook named "+name+" version "+version)
 		return
@@ -369,14 +433,26 @@ func (a *API) putCookbookVersion(w http.ResponseWriter, r *http.Request) {
 
 	// Every referenced file must already be in the blob store.
 	for _, sum := range manifestChecksums(m) {
-		if !org.HasBlob(sum) {
+		has, err := org.HasBlob(sum)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !has {
 			writeError(w, http.StatusBadRequest, "Manifest has a checksum that hasn't been uploaded: "+sum)
 			return
 		}
 	}
 
-	_, existed := org.Get("cookbooks", cookbookKey(name, version))
-	org.Put("cookbooks", cookbookKey(name, version), mustEncode(m))
+	_, existed, err := org.Get("cookbooks", cookbookKey(name, version))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := org.Put("cookbooks", cookbookKey(name, version), mustEncode(m)); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	status := http.StatusCreated
 	if existed {
@@ -392,19 +468,30 @@ func (a *API) deleteCookbookVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	version, ok := resolveVersion(org, name, r.PathValue("version"))
+	version, ok, err := resolveVersion(org, name, r.PathValue("version"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find a cookbook named "+name)
 		return
 	}
-	raw, ok := org.Delete("cookbooks", cookbookKey(name, version))
+	raw, ok, err := org.Delete("cookbooks", cookbookKey(name, version))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find a cookbook named "+name+" version "+version)
 		return
 	}
 	var m map[string]any
 	if json.Unmarshal(raw, &m) == nil {
-		gcOrphanedBlobs(org, manifestChecksums(m))
+		if err := gcOrphanedBlobs(org, manifestChecksums(m)); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		injectFileURLs(m, r, org.Name())
 		writeJSON(w, http.StatusOK, m)
 		return
@@ -417,8 +504,13 @@ func (a *API) cookbooksLatest(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
+	cv, err := cookbookVersions(org)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	out := map[string]string{}
-	for name, vers := range cookbookVersions(org) {
+	for name, vers := range cv {
 		if len(vers) > 0 {
 			out[name] = cookbookBaseURL(r, org.Name(), name) + "/" + vers[0]
 		}
@@ -431,13 +523,22 @@ func (a *API) cookbookRecipesEndpoint(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
+	cv, err := cookbookVersions(org)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	seen := map[string]bool{}
 	var recipes []string
-	for name, vers := range cookbookVersions(org) {
+	for name, vers := range cv {
 		if len(vers) == 0 {
 			continue
 		}
-		raw, ok := org.Get("cookbooks", cookbookKey(name, vers[0]))
+		raw, ok, err := org.Get("cookbooks", cookbookKey(name, vers[0]))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		if !ok {
 			continue
 		}
@@ -490,11 +591,18 @@ func manifestChecksums(m map[string]any) []string {
 
 // referencedChecksums returns the set of file-store checksums still referenced
 // by any stored cookbook or cookbook_artifact manifest.
-func referencedChecksums(org *store.Org) map[string]bool {
+func referencedChecksums(org *store.Org) (map[string]bool, error) {
 	refs := map[string]bool{}
 	for _, coll := range []string{"cookbooks", "cookbook_artifacts"} {
-		for _, key := range org.Keys(coll) {
-			raw, ok := org.Get(coll, key)
+		keys, err := org.Keys(coll)
+		if err != nil {
+			return nil, err
+		}
+		for _, key := range keys {
+			raw, ok, err := org.Get(coll, key)
+			if err != nil {
+				return nil, err
+			}
 			if !ok {
 				continue
 			}
@@ -507,23 +615,29 @@ func referencedChecksums(org *store.Org) map[string]bool {
 			}
 		}
 	}
-	return refs
+	return refs, nil
 }
 
 // gcOrphanedBlobs deletes each candidate checksum from the file store unless it
 // is still referenced by some remaining cookbook or artifact manifest. Call it
 // after removing a manifest so its now-orphaned content becomes unavailable,
 // while content shared with another version/artifact survives.
-func gcOrphanedBlobs(org *store.Org, candidates []string) {
+func gcOrphanedBlobs(org *store.Org, candidates []string) error {
 	if len(candidates) == 0 {
-		return
+		return nil
 	}
-	referenced := referencedChecksums(org)
+	referenced, err := referencedChecksums(org)
+	if err != nil {
+		return err
+	}
 	for _, sum := range candidates {
 		if !referenced[sum] {
-			org.DeleteBlob(sum)
+			if err := org.DeleteBlob(sum); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 func injectFileURLs(m map[string]any, r *http.Request, org string) {

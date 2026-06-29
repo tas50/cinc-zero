@@ -26,7 +26,9 @@ func putUser(t *testing.T, srv *Server, name string, key *rsa.PrivateKey) []byte
 		t.Fatal(err)
 	}
 	doc := fmt.Sprintf(`{"username":%q,"public_key":%q}`, name, string(pubPEM))
-	srv.Store().Global().Put("users", name, []byte(doc))
+	if err := srv.Store().Global().Put("users", name, []byte(doc)); err != nil {
+		t.Fatal(err)
+	}
 	return auth.EncodePrivateKeyPEM(key)
 }
 

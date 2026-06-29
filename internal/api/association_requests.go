@@ -40,8 +40,17 @@ func (a *API) listOrgInvites(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := make([]map[string]any, 0)
-	for _, id := range org.Keys(assocReqColl) {
-		raw, _ := org.Get(assocReqColl, id)
+	keys, err := org.Keys(assocReqColl)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for _, id := range keys {
+		raw, _, err := org.Get(assocReqColl, id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		var inv map[string]any
 		json.Unmarshal(raw, &inv)
 		out = append(out, map[string]any{"id": id, "username": inv["username"]})
@@ -67,16 +76,25 @@ func (a *API) createInvite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Field 'user' missing")
 		return
 	}
-	if _, ok := a.store.Global().Get("users", user); !ok {
+	if _, ok, err := a.store.Global().Get("users", user); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find user "+user)
 		return
 	}
-	if _, ok := org.Get(assocColl, user); ok {
+	if _, ok, err := org.Get(assocColl, user); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if ok {
 		writeStringError(w, http.StatusConflict, "The association already exists.")
 		return
 	}
 	id := inviteID(user, org.Name())
-	if _, ok := org.Get(assocReqColl, id); ok {
+	if _, ok, err := org.Get(assocReqColl, id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if ok {
 		writeStringError(w, http.StatusConflict, "The invitation already exists.")
 		return
 	}
@@ -86,9 +104,12 @@ func (a *API) createInvite(w http.ResponseWriter, r *http.Request) {
 	if actor, ok := actorFromContext(r.Context()); ok {
 		inviter = actor.Name
 	}
-	org.Put(assocReqColl, id, mustEncode(map[string]any{
+	if err := org.Put(assocReqColl, id, mustEncode(map[string]any{
 		"id": id, "username": user, "orgname": org.Name(), "inviter": inviter,
-	}))
+	})); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"uri":               requestBaseURL(r) + "/organizations/" + org.Name() + "/association_requests/" + id,
 		"id":                id,
@@ -101,7 +122,11 @@ func (a *API) rescindInvite(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	raw, ok := org.Delete(assocReqColl, r.PathValue("id"))
+	raw, ok, err := org.Delete(assocReqColl, r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeStringError(w, http.StatusNotFound, "Cannot find association request: "+r.PathValue("id"))
 		return
@@ -110,28 +135,49 @@ func (a *API) rescindInvite(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) listUserInvites(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, a.userInvites(r.PathValue("user")))
+	invites, err := a.userInvites(r.PathValue("user"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, invites)
 }
 
 func (a *API) countUserInvites(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"value": len(a.userInvites(r.PathValue("user")))})
+	invites, err := a.userInvites(r.PathValue("user"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"value": len(invites)})
 }
 
 // userInvites collects the pending invites for a user across all organizations.
-func (a *API) userInvites(user string) []map[string]any {
+func (a *API) userInvites(user string) ([]map[string]any, error) {
 	out := make([]map[string]any, 0)
-	for _, name := range a.store.ListOrgs() {
-		org, ok := a.store.Org(name)
+	orgs, err := a.store.ListOrgs()
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range orgs {
+		org, ok, err := a.store.Org(name)
+		if err != nil {
+			return nil, err
+		}
 		if !ok {
 			continue
 		}
-		if raw, ok := org.Get(assocReqColl, inviteID(user, name)); ok {
+		raw, ok, err := org.Get(assocReqColl, inviteID(user, name))
+		if err != nil {
+			return nil, err
+		}
+		if ok {
 			var inv map[string]any
 			json.Unmarshal(raw, &inv)
 			out = append(out, map[string]any{"id": inviteID(user, name), "orgname": name})
 		}
 	}
-	return out
+	return out, nil
 }
 
 // respondInvite accepts or rejects an invitation. Only the invited user may
@@ -148,7 +194,11 @@ func (a *API) respondInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	org, ok := a.findInvite(user, id)
+	org, ok, err := a.findInvite(user, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeStringError(w, http.StatusNotFound, "Cannot find association request: "+id)
 		return
@@ -169,19 +219,36 @@ func (a *API) respondInvite(w http.ResponseWriter, r *http.Request) {
 		var inv struct {
 			Inviter string `json:"inviter"`
 		}
-		if raw, ok := org.Get(assocReqColl, id); ok {
+		if raw, ok, err := org.Get(assocReqColl, id); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		} else if ok {
 			json.Unmarshal(raw, &inv)
 		}
-		if !a.inviterAuthorized(org, inv.Inviter) {
+		authorized, err := a.inviterAuthorized(org, inv.Inviter)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !authorized {
 			writeStringError(w, http.StatusForbidden, "The user who issued this invitation can no longer do so.")
 			return
 		}
 	}
 
-	org.Delete(assocReqColl, id)
+	if _, _, err := org.Delete(assocReqColl, id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if body.Response == "accept" {
-		org.Put(assocColl, user, mustEncode(map[string]any{"username": user}))
-		addUserToOrgGroup(org, "users", user)
+		if err := org.Put(assocColl, user, mustEncode(map[string]any{"username": user})); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if err := addUserToOrgGroup(org, "users", user); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"organization": map[string]any{"name": org.Name()},
@@ -193,64 +260,88 @@ func (a *API) respondInvite(w http.ResponseWriter, r *http.Request) {
 // still exist, still be associated with the org, and still belong to its
 // "admins" group. An empty inviter (created without an authenticated actor) is
 // treated as authorized.
-func (a *API) inviterAuthorized(org *store.Org, inviter string) bool {
+func (a *API) inviterAuthorized(org *store.Org, inviter string) (bool, error) {
 	if inviter == "" {
-		return true
+		return true, nil
 	}
-	uraw, ok := a.store.Global().Get("users", inviter)
+	uraw, ok, err := a.store.Global().Get("users", inviter)
+	if err != nil {
+		return false, err
+	}
 	if !ok {
-		return false
+		return false, nil
 	}
 	var u map[string]any
 	json.Unmarshal(uraw, &u)
 	if admin, _ := u["admin"].(bool); admin {
-		return true
+		return true, nil
 	}
-	if _, ok := org.Get(assocColl, inviter); !ok {
-		return false
+	if _, ok, err := org.Get(assocColl, inviter); err != nil {
+		return false, err
+	} else if !ok {
+		return false, nil
 	}
-	if raw, ok := org.Get("groups", "admins"); ok {
+	raw, ok, err := org.Get("groups", "admins")
+	if err != nil {
+		return false, err
+	}
+	if ok {
 		var g map[string]any
 		if json.Unmarshal(raw, &g) == nil && slices.Contains(anyStrings(g["users"]), inviter) {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // addUserToOrgGroup adds user to the named org group's user list (creating the
 // group if absent), so authorization membership reflects the new member.
-func addUserToOrgGroup(org *store.Org, group, user string) {
+func addUserToOrgGroup(org *store.Org, group, user string) error {
 	var users, clients, groups []string
-	if raw, ok := org.Get("groups", group); ok {
+	raw, ok, err := org.Get("groups", group)
+	if err != nil {
+		return err
+	}
+	if ok {
 		var g map[string]any
 		if json.Unmarshal(raw, &g) == nil {
 			users, clients, groups = groupMembers(g)
 		}
 	}
 	if slices.Contains(users, user) {
-		return
+		return nil
 	}
 	users = append(users, user)
-	org.Put("groups", group, mustEncode(groupDoc(group, users, clients, groups)))
+	return org.Put("groups", group, mustEncode(groupDoc(group, users, clients, groups)))
 }
 
 // findInvite locates the org holding the given invitation id for the user.
-func (a *API) findInvite(user, id string) (*store.Org, bool) {
-	for _, name := range a.store.ListOrgs() {
-		org, ok := a.store.Org(name)
+func (a *API) findInvite(user, id string) (*store.Org, bool, error) {
+	orgs, err := a.store.ListOrgs()
+	if err != nil {
+		return nil, false, err
+	}
+	for _, name := range orgs {
+		org, ok, err := a.store.Org(name)
+		if err != nil {
+			return nil, false, err
+		}
 		if !ok {
 			continue
 		}
-		if raw, ok := org.Get(assocReqColl, id); ok {
+		raw, ok, err := org.Get(assocReqColl, id)
+		if err != nil {
+			return nil, false, err
+		}
+		if ok {
 			var inv struct {
 				Username string `json:"username"`
 			}
 			json.Unmarshal(raw, &inv)
 			if inv.Username == user {
-				return org, true
+				return org, true, nil
 			}
 		}
 	}
-	return nil, false
+	return nil, false, nil
 }

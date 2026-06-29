@@ -23,15 +23,21 @@ func testOrg(t *testing.T) *store.Org {
 }
 
 // putGroup writes a group document with the given members.
-func putGroup(org *store.Org, name string, users, clients, groups []string) {
-	org.Put("groups", name, mustEncode(groupDoc(name, users, clients, groups)))
+func putGroup(t *testing.T, org *store.Org, name string, users, clients, groups []string) {
+	t.Helper()
+	if err := org.Put("groups", name, mustEncode(groupDoc(name, users, clients, groups))); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestActorGroupsDirectMembership(t *testing.T) {
 	org := testOrg(t)
-	putGroup(org, "users", []string{"alice"}, nil, nil)
+	putGroup(t, org, "users", []string{"alice"}, nil, nil)
 
-	got := actorGroups(org, Actor{Name: "alice"})
+	got, err := actorGroups(org, Actor{Name: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !got["users"] {
 		t.Fatalf("alice should be in users group; got %v", got)
 	}
@@ -43,13 +49,19 @@ func TestActorGroupsDirectMembership(t *testing.T) {
 func TestActorGroupsDistinguishesUsersFromClients(t *testing.T) {
 	org := testOrg(t)
 	// "bob" is listed only as a client, not a user.
-	putGroup(org, "clients", nil, []string{"bob"}, nil)
+	putGroup(t, org, "clients", nil, []string{"bob"}, nil)
 
-	asClient := actorGroups(org, Actor{Name: "bob", IsClient: true})
+	asClient, err := actorGroups(org, Actor{Name: "bob", IsClient: true})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !asClient["clients"] {
 		t.Fatalf("client bob should be in clients group; got %v", asClient)
 	}
-	asUser := actorGroups(org, Actor{Name: "bob", IsClient: false})
+	asUser, err := actorGroups(org, Actor{Name: "bob", IsClient: false})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if asUser["clients"] {
 		t.Fatalf("user bob should not match the client membership; got %v", asUser)
 	}
@@ -57,11 +69,14 @@ func TestActorGroupsDistinguishesUsersFromClients(t *testing.T) {
 
 func TestActorGroupsTransitive(t *testing.T) {
 	org := testOrg(t)
-	putGroup(org, "users", []string{"alice"}, nil, nil)
+	putGroup(t, org, "users", []string{"alice"}, nil, nil)
 	// superusers contains the users group; alice is therefore a superuser too.
-	putGroup(org, "superusers", nil, nil, []string{"users"})
+	putGroup(t, org, "superusers", nil, nil, []string{"users"})
 
-	got := actorGroups(org, Actor{Name: "alice"})
+	got, err := actorGroups(org, Actor{Name: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !got["users"] || !got["superusers"] {
 		t.Fatalf("alice should be in users and superusers; got %v", got)
 	}
@@ -69,10 +84,13 @@ func TestActorGroupsTransitive(t *testing.T) {
 
 func TestActorGroupsCycleTerminates(t *testing.T) {
 	org := testOrg(t)
-	putGroup(org, "a", []string{"alice"}, nil, []string{"b"})
-	putGroup(org, "b", nil, nil, []string{"a"})
+	putGroup(t, org, "a", []string{"alice"}, nil, []string{"b"})
+	putGroup(t, org, "b", nil, nil, []string{"a"})
 
-	got := actorGroups(org, Actor{Name: "alice"})
+	got, err := actorGroups(org, Actor{Name: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !got["a"] || !got["b"] {
 		t.Fatalf("alice should be in both cyclic groups; got %v", got)
 	}
@@ -80,13 +98,23 @@ func TestActorGroupsCycleTerminates(t *testing.T) {
 
 func TestActorAllowedDirectActor(t *testing.T) {
 	org := testOrg(t)
-	org.Put("acls", aclKey("nodes", "web01"), mustEncode(map[string]any{
+	if err := org.Put("acls", aclKey("nodes", "web01"), mustEncode(map[string]any{
 		"read": map[string]any{"actors": []string{"alice"}, "groups": []string{}},
-	}))
-	if !actorAllowed(org, Actor{Name: "alice"}, "nodes", "web01", "read") {
+	})); err != nil {
+		t.Fatal(err)
+	}
+	allowed, err := actorAllowed(org, Actor{Name: "alice"}, "nodes", "web01", "read")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !allowed {
 		t.Fatal("alice is a direct actor on read and should be allowed")
 	}
-	if actorAllowed(org, Actor{Name: "mallory"}, "nodes", "web01", "read") {
+	allowed, err = actorAllowed(org, Actor{Name: "mallory"}, "nodes", "web01", "read")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allowed {
 		t.Fatal("mallory is not on the ACE and should be denied")
 	}
 }
@@ -94,18 +122,30 @@ func TestActorAllowedDirectActor(t *testing.T) {
 func TestActorAllowedViaGroupDefaultACL(t *testing.T) {
 	org := testOrg(t)
 	// Default ACL grants read to admins,users,clients. Put alice in users.
-	putGroup(org, "users", []string{"alice"}, nil, nil)
+	putGroup(t, org, "users", []string{"alice"}, nil, nil)
 
-	if !actorAllowed(org, Actor{Name: "alice"}, "nodes", "web01", "read") {
+	allowed, err := actorAllowed(org, Actor{Name: "alice"}, "nodes", "web01", "read")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !allowed {
 		t.Fatal("alice (in users) should get default read")
 	}
 	// A non-member is denied even though the object has the permissive default.
-	if actorAllowed(org, Actor{Name: "stranger"}, "nodes", "web01", "read") {
+	allowed, err = actorAllowed(org, Actor{Name: "stranger"}, "nodes", "web01", "read")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allowed {
 		t.Fatal("stranger is in no group and should be denied")
 	}
 	// Default ACL does not grant create to clients.
-	putGroup(org, "clients", nil, []string{"node1"}, nil)
-	if actorAllowed(org, Actor{Name: "node1", IsClient: true}, "nodes", "web01", "create") {
+	putGroup(t, org, "clients", nil, []string{"node1"}, nil)
+	allowed, err = actorAllowed(org, Actor{Name: "node1", IsClient: true}, "nodes", "web01", "create")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allowed {
 		t.Fatal("clients are not granted create by the default ACL")
 	}
 }
@@ -192,7 +232,9 @@ func enforcingHandler(t *testing.T) (http.Handler, *store.Store) {
 		t.Fatal(err)
 	}
 	SeedOrg(org)
-	org.Put("nodes", "web01", []byte(`{"name":"web01"}`))
+	if err := org.Put("nodes", "web01", []byte(`{"name":"web01"}`)); err != nil {
+		t.Fatal(err)
+	}
 	return New(st, WithACLEnforcement(true)).Handler(), st
 }
 
@@ -229,8 +271,11 @@ func TestEnforceDeniesWithoutPermission(t *testing.T) {
 
 func TestEnforceAllowsViaGroup(t *testing.T) {
 	h, st := enforcingHandler(t)
-	org, _ := st.Org("acme")
-	putGroup(org, "users", []string{"alice"}, nil, nil)
+	org, _, err := st.Org("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	putGroup(t, org, "users", []string{"alice"}, nil, nil)
 	code, body := authzReq(t, h, Actor{Name: "alice"}, "GET", "/organizations/acme/nodes/web01", "")
 	if code != http.StatusOK {
 		t.Fatalf("alice (in users) read = %d, want 200; body %s", code, body)
@@ -267,9 +312,14 @@ func TestEnforceAllowsUnclassifiedRoutes(t *testing.T) {
 
 func TestEnforceDisabledAllowsEverything(t *testing.T) {
 	st := store.New()
-	org, _ := st.CreateOrg("acme")
+	org, err := st.CreateOrg("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
 	SeedOrg(org)
-	org.Put("nodes", "web01", []byte(`{"name":"web01"}`))
+	if err := org.Put("nodes", "web01", []byte(`{"name":"web01"}`)); err != nil {
+		t.Fatal(err)
+	}
 	h := New(st).Handler() // enforcement off (default)
 	code, _ := authzReq(t, h, Actor{Name: "stranger"}, "GET", "/organizations/acme/nodes/web01", "")
 	if code != http.StatusOK {
@@ -282,12 +332,23 @@ func TestSeedGrantsValidatorClientCreate(t *testing.T) {
 	if _, err := CreateOrganization(st, "acme", "acme"); err != nil {
 		t.Fatal(err)
 	}
-	org, _ := st.Org("acme")
-	if !actorAllowed(org, Actor{Name: "acme-validator", IsClient: true}, "containers", "clients", "create") {
+	org, _, err := st.Org("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed, err := actorAllowed(org, Actor{Name: "acme-validator", IsClient: true}, "containers", "clients", "create")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !allowed {
 		t.Fatal("the org validator should be granted create on the clients container")
 	}
 	// A non-validator client is still denied create.
-	if actorAllowed(org, Actor{Name: "node1", IsClient: true}, "containers", "clients", "create") {
+	allowed, err = actorAllowed(org, Actor{Name: "node1", IsClient: true}, "containers", "clients", "create")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allowed {
 		t.Fatal("an ordinary client should not be granted create on clients")
 	}
 }
@@ -310,9 +371,16 @@ func TestEnforceValidatorCreatesClient(t *testing.T) {
 // granted the relevant ACE succeeds.
 func TestEnforceGroupsAndContainers(t *testing.T) {
 	h, st := enforcingHandler(t)
-	org, _ := st.Org("acme")
-	org.Put("groups", "grp1", mustEncode(groupDoc("grp1", nil, nil, nil)))
-	org.Put("containers", "cont1", []byte(`{"containername":"cont1"}`))
+	org, _, err := st.Org("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := org.Put("groups", "grp1", mustEncode(groupDoc("grp1", nil, nil, nil))); err != nil {
+		t.Fatal(err)
+	}
+	if err := org.Put("containers", "cont1", []byte(`{"containername":"cont1"}`)); err != nil {
+		t.Fatal(err)
+	}
 	stranger := Actor{Name: "stranger"}
 
 	denied := []struct{ method, path, body string }{
@@ -333,9 +401,11 @@ func TestEnforceGroupsAndContainers(t *testing.T) {
 	}
 
 	// A normal user granted update on the group's ACL may PUT it.
-	org.Put("acls", aclKey("groups", "grp1"), mustEncode(map[string]any{
+	if err := org.Put("acls", aclKey("groups", "grp1"), mustEncode(map[string]any{
 		"update": map[string]any{"actors": []string{"editor"}, "groups": []string{}},
-	}))
+	})); err != nil {
+		t.Fatal(err)
+	}
 	if code, body := authzReq(t, h, Actor{Name: "editor"}, "PUT", "/organizations/acme/groups/grp1", `{"groupname":"grp1"}`); code != http.StatusOK {
 		t.Errorf("editor PUT group with update ACE = %d, want 200; body %s", code, body)
 	}
@@ -346,8 +416,12 @@ func TestEnforceGroupsAndContainers(t *testing.T) {
 // user may act on its own record and the superuser may act on any.
 func TestEnforceGlobalUsersSuperuserOnly(t *testing.T) {
 	h, st := enforcingHandler(t)
-	st.Global().Put("users", "bob", []byte(`{"username":"bob"}`))
-	st.Global().Put("users", "carol", []byte(`{"username":"carol"}`))
+	if err := st.Global().Put("users", "bob", []byte(`{"username":"bob"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Global().Put("users", "carol", []byte(`{"username":"carol"}`)); err != nil {
+		t.Fatal(err)
+	}
 
 	// A normal org admin is not a global admin: denied list/create and acting
 	// on another user.
@@ -394,7 +468,9 @@ func TestEnforceGlobalUsersSuperuserOnly(t *testing.T) {
 // bypasses.
 func TestEnforceUserACL(t *testing.T) {
 	h, st := enforcingHandler(t)
-	st.Global().Put("users", "bob", []byte(`{"username":"bob"}`))
+	if err := st.Global().Put("users", "bob", []byte(`{"username":"bob"}`)); err != nil {
+		t.Fatal(err)
+	}
 
 	stranger := Actor{Name: "stranger"}
 	for _, c := range []struct{ method, path, body string }{
@@ -408,9 +484,11 @@ func TestEnforceUserACL(t *testing.T) {
 	}
 
 	// Grant "granter" the grant permission on bob's user object (global space).
-	st.Global().Put("acls", aclKey("users", "bob"), mustEncode(map[string]any{
+	if err := st.Global().Put("acls", aclKey("users", "bob"), mustEncode(map[string]any{
 		"grant": map[string]any{"actors": []string{"granter"}, "groups": []string{}},
-	}))
+	})); err != nil {
+		t.Fatal(err)
+	}
 	if code, body := authzReq(t, h, Actor{Name: "granter"}, "GET", "/users/bob/_acl", ""); code != http.StatusOK {
 		t.Errorf("granter GET user acl = %d, want 200; body %s", code, body)
 	}
@@ -424,10 +502,15 @@ func TestEnforceUserACL(t *testing.T) {
 // others are denied.
 func TestEnforceOrgACL(t *testing.T) {
 	h, st := enforcingHandler(t)
-	org, _ := st.Org("acme")
-	org.Put("acls", aclKey("organizations", "acme"), mustEncode(map[string]any{
+	org, _, err := st.Org("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := org.Put("acls", aclKey("organizations", "acme"), mustEncode(map[string]any{
 		"grant": map[string]any{"actors": []string{"granter"}, "groups": []string{}},
-	}))
+	})); err != nil {
+		t.Fatal(err)
+	}
 
 	if code, body := authzReq(t, h, Actor{Name: "stranger"}, "GET", "/organizations/acme/_acl", ""); code != http.StatusForbidden {
 		t.Errorf("stranger GET org acl = %d, want 403; body %s", code, body)

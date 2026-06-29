@@ -8,8 +8,8 @@ import (
 
 func TestCreateOrgAndLookup(t *testing.T) {
 	s := New()
-	if _, ok := s.Org("acme"); ok {
-		t.Fatal("org should not exist yet")
+	if _, ok, err := s.Org("acme"); err != nil || ok {
+		t.Fatalf("org should not exist yet: ok=%v err=%v", ok, err)
 	}
 	org, err := s.CreateOrg("acme")
 	if err != nil {
@@ -18,9 +18,9 @@ func TestCreateOrgAndLookup(t *testing.T) {
 	if org == nil {
 		t.Fatal("expected org")
 	}
-	got, ok := s.Org("acme")
-	if !ok || got != org {
-		t.Fatal("Org lookup did not return created org")
+	got, ok, err := s.Org("acme")
+	if err != nil || !ok || got.Name() != "acme" {
+		t.Fatalf("Org lookup: got=%v ok=%v err=%v", got, ok, err)
 	}
 }
 
@@ -36,20 +36,23 @@ func TestCreateOrgConflict(t *testing.T) {
 
 func TestListAndDeleteOrgs(t *testing.T) {
 	s := New()
-	s.CreateOrg("b")
-	s.CreateOrg("a")
-	got := s.ListOrgs()
+	mustCreateOrg(t, s, "b")
+	mustCreateOrg(t, s, "a")
+	got, err := s.ListOrgs()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
 		t.Fatalf("ListOrgs not sorted: %v", got)
 	}
-	if !s.DeleteOrg("a") {
-		t.Fatal("DeleteOrg should return true")
+	if existed, err := s.DeleteOrg("a"); err != nil || !existed {
+		t.Fatalf("DeleteOrg should report existed: existed=%v err=%v", existed, err)
 	}
-	if s.DeleteOrg("a") {
-		t.Fatal("second DeleteOrg should return false")
+	if existed, err := s.DeleteOrg("a"); err != nil || existed {
+		t.Fatalf("second DeleteOrg should report not-existed: existed=%v err=%v", existed, err)
 	}
-	if len(s.ListOrgs()) != 1 {
-		t.Fatal("org not deleted")
+	if got, err := s.ListOrgs(); err != nil || len(got) != 1 {
+		t.Fatalf("org not deleted: %v err=%v", got, err)
 	}
 }
 
@@ -57,8 +60,8 @@ func TestOrgCreateGetDelete(t *testing.T) {
 	s := New()
 	org, _ := s.CreateOrg("acme")
 
-	if _, ok := org.Get("nodes", "web"); ok {
-		t.Fatal("node should not exist")
+	if _, ok, err := org.Get("nodes", "web"); err != nil || ok {
+		t.Fatalf("node should not exist: ok=%v err=%v", ok, err)
 	}
 	if err := org.Create("nodes", "web", []byte(`{"name":"web"}`)); err != nil {
 		t.Fatalf("Create: %v", err)
@@ -66,15 +69,15 @@ func TestOrgCreateGetDelete(t *testing.T) {
 	if err := org.Create("nodes", "web", []byte(`{}`)); err != ErrConflict {
 		t.Fatalf("expected ErrConflict on duplicate, got %v", err)
 	}
-	got, ok := org.Get("nodes", "web")
-	if !ok || string(got) != `{"name":"web"}` {
-		t.Fatalf("Get returned %q ok=%v", got, ok)
+	got, ok, err := org.Get("nodes", "web")
+	if err != nil || !ok || string(got) != `{"name":"web"}` {
+		t.Fatalf("Get returned %q ok=%v err=%v", got, ok, err)
 	}
-	deleted, ok := org.Delete("nodes", "web")
-	if !ok || string(deleted) != `{"name":"web"}` {
-		t.Fatalf("Delete returned %q ok=%v", deleted, ok)
+	deleted, ok, err := org.Delete("nodes", "web")
+	if err != nil || !ok || string(deleted) != `{"name":"web"}` {
+		t.Fatalf("Delete returned %q ok=%v err=%v", deleted, ok, err)
 	}
-	if _, ok := org.Get("nodes", "web"); ok {
+	if _, ok, _ := org.Get("nodes", "web"); ok {
 		t.Fatal("node should be gone after delete")
 	}
 }
@@ -82,14 +85,17 @@ func TestOrgCreateGetDelete(t *testing.T) {
 func TestOrgPutUpsertsAndKeysSorted(t *testing.T) {
 	s := New()
 	org, _ := s.CreateOrg("acme")
-	org.Put("roles", "z", []byte(`{"v":1}`))
-	org.Put("roles", "a", []byte(`{"v":1}`))
-	org.Put("roles", "a", []byte(`{"v":2}`)) // upsert, no error
-	keys := org.Keys("roles")
+	mustPut(t, org, "roles", "z", `{"v":1}`)
+	mustPut(t, org, "roles", "a", `{"v":1}`)
+	mustPut(t, org, "roles", "a", `{"v":2}`) // upsert
+	keys, err := org.Keys("roles")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(keys) != 2 || keys[0] != "a" || keys[1] != "z" {
 		t.Fatalf("Keys not sorted unique: %v", keys)
 	}
-	got, _ := org.Get("roles", "a")
+	got, _, _ := org.Get("roles", "a")
 	if string(got) != `{"v":2}` {
 		t.Fatalf("Put did not upsert: %s", got)
 	}
@@ -99,9 +105,9 @@ func TestStoredValueIsCopied(t *testing.T) {
 	s := New()
 	org, _ := s.CreateOrg("acme")
 	val := []byte(`{"name":"web"}`)
-	org.Put("nodes", "web", val)
+	mustPut(t, org, "nodes", "web", string(val))
 	val[2] = 'X' // mutate caller's slice
-	got, _ := org.Get("nodes", "web")
+	got, _, _ := org.Get("nodes", "web")
 	if string(got) != `{"name":"web"}` {
 		t.Fatalf("store aliased caller slice: %s", got)
 	}
@@ -110,57 +116,53 @@ func TestStoredValueIsCopied(t *testing.T) {
 func TestViewReturnsStoredValue(t *testing.T) {
 	s := New()
 	org, _ := s.CreateOrg("acme")
-	org.Put("nodes", "web", []byte(`{"name":"web"}`))
-	got, ok := org.View("nodes", "web")
-	if !ok || string(got) != `{"name":"web"}` {
-		t.Fatalf("View returned %q ok=%v", got, ok)
+	mustPut(t, org, "nodes", "web", `{"name":"web"}`)
+	got, ok, err := org.View("nodes", "web")
+	if err != nil || !ok || string(got) != `{"name":"web"}` {
+		t.Fatalf("View returned %q ok=%v err=%v", got, ok, err)
 	}
-	if _, ok := org.View("nodes", "missing"); ok {
+	if _, ok, _ := org.View("nodes", "missing"); ok {
 		t.Fatal("View of missing key should report false")
 	}
 }
 
-// TestViewReturnsReferenceNotCopy documents View's contract: it returns the
-// stored backing slice directly (no defensive copy), unlike Get. Callers must
-// treat the result as read-only.
-func TestViewReturnsReferenceNotCopy(t *testing.T) {
+// TestViewReturnsIndependentCopy documents View's contract under the pluggable
+// backend: it returns an owned copy (the no-copy fast path is internal to the
+// backend's Range), so mutating the result must not affect stored state.
+func TestViewReturnsIndependentCopy(t *testing.T) {
 	s := New()
 	org, _ := s.CreateOrg("acme")
-	org.Put("nodes", "web", []byte(`{"name":"web"}`))
-	a, _ := org.View("nodes", "web")
-	b, _ := org.View("nodes", "web")
-	if &a[0] != &b[0] {
-		t.Fatal("View should return the backing slice without copying")
-	}
-	c, _ := org.Get("nodes", "web")
-	if &a[0] == &c[0] {
-		t.Fatal("Get should return a defensive copy distinct from View")
+	mustPut(t, org, "nodes", "web", `{"name":"web"}`)
+	got, _, _ := org.View("nodes", "web")
+	got[2] = 'X'
+	again, _, _ := org.View("nodes", "web")
+	if string(again) != `{"name":"web"}` {
+		t.Fatalf("View result aliased stored value: %s", again)
 	}
 }
 
-func TestRangeVisitsAllEntriesCopyFree(t *testing.T) {
+func TestRangeVisitsAllEntries(t *testing.T) {
 	s := New()
 	org, _ := s.CreateOrg("acme")
-	org.Put("nodes", "a", []byte(`{"n":"a"}`))
-	org.Put("nodes", "b", []byte(`{"n":"b"}`))
+	mustPut(t, org, "nodes", "a", `{"n":"a"}`)
+	mustPut(t, org, "nodes", "b", `{"n":"b"}`)
 
 	seen := map[string]string{}
-	org.Range("nodes", func(key string, raw []byte) bool {
+	if err := org.Range("nodes", func(key string, raw []byte) bool {
 		seen[key] = string(raw)
-		// raw must be the backing slice, not a copy.
-		ref, _ := org.View("nodes", key)
-		if &raw[0] != &ref[0] {
-			t.Errorf("Range copied value for %q", key)
-		}
 		return true
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if len(seen) != 2 || seen["a"] != `{"n":"a"}` || seen["b"] != `{"n":"b"}` {
 		t.Fatalf("Range did not visit all entries: %v", seen)
 	}
 
 	// An empty collection yields no calls.
 	calls := 0
-	org.Range("missing", func(string, []byte) bool { calls++; return true })
+	if err := org.Range("missing", func(string, []byte) bool { calls++; return true }); err != nil {
+		t.Fatal(err)
+	}
 	if calls != 0 {
 		t.Fatalf("Range over empty collection called fn %d times", calls)
 	}
@@ -170,13 +172,15 @@ func TestRangeStopsWhenFnReturnsFalse(t *testing.T) {
 	s := New()
 	org, _ := s.CreateOrg("acme")
 	for _, k := range []string{"a", "b", "c"} {
-		org.Put("nodes", k, []byte(`{}`))
+		mustPut(t, org, "nodes", k, `{}`)
 	}
 	count := 0
-	org.Range("nodes", func(string, []byte) bool {
+	if err := org.Range("nodes", func(string, []byte) bool {
 		count++
 		return false // stop after the first
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if count != 1 {
 		t.Fatalf("Range visited %d entries, want 1 (early stop)", count)
 	}
@@ -188,13 +192,18 @@ func TestCollectionsListsNonEmptyOnly(t *testing.T) {
 	if got := org.Name(); got != "acme" {
 		t.Fatalf("Name = %q", got)
 	}
-	if cols := org.Collections(); len(cols) != 0 {
-		t.Fatalf("expected no collections, got %v", cols)
+	if cols, err := org.Collections(); err != nil || len(cols) != 0 {
+		t.Fatalf("expected no collections, got %v err=%v", cols, err)
 	}
-	org.Put("roles", "web", []byte(`{}`))
-	org.Put("nodes", "n1", []byte(`{}`))
-	org.Delete("nodes", "n1") // empties the collection
-	cols := org.Collections()
+	mustPut(t, org, "roles", "web", `{}`)
+	mustPut(t, org, "nodes", "n1", `{}`)
+	if _, _, err := org.Delete("nodes", "n1"); err != nil { // empties the collection
+		t.Fatal(err)
+	}
+	cols, err := org.Collections()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(cols) != 1 || cols[0] != "roles" {
 		t.Fatalf("Collections should list only non-empty: %v", cols)
 	}
@@ -206,15 +215,13 @@ func TestConcurrentAccess(t *testing.T) {
 	org, _ := s.CreateOrg("acme")
 	var wg sync.WaitGroup
 	for i := range 50 {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+		wg.Go(func() {
 			key := fmt.Sprintf("n%d", i%10)
 			org.Put("nodes", key, []byte(`{"i":1}`))
 			org.Get("nodes", key)
 			org.Keys("nodes")
 			s.ListOrgs()
-		}(i)
+		})
 	}
 	wg.Wait()
 }
@@ -225,15 +232,12 @@ func TestGlobalSpaceIsStableAndSeparate(t *testing.T) {
 	if g == nil {
 		t.Fatal("Global returned nil")
 	}
-	if s.Global() != g {
-		t.Fatal("Global should return the same instance")
-	}
-	g.Put("users", "admin", []byte(`{"name":"admin"}`))
+	mustPut(t, g, "users", "admin", `{"name":"admin"}`)
 	org, _ := s.CreateOrg("acme")
-	if _, ok := org.Get("users", "admin"); ok {
+	if _, ok, _ := org.Get("users", "admin"); ok {
 		t.Fatal("global users must not leak into orgs")
 	}
-	if got, ok := g.Get("users", "admin"); !ok || string(got) != `{"name":"admin"}` {
+	if got, ok, err := g.Get("users", "admin"); err != nil || !ok || string(got) != `{"name":"admin"}` {
 		t.Fatal("global value not retrievable")
 	}
 }
@@ -242,8 +246,22 @@ func TestOrgsAreIsolated(t *testing.T) {
 	s := New()
 	a, _ := s.CreateOrg("a")
 	b, _ := s.CreateOrg("b")
-	a.Put("nodes", "web", []byte(`{}`))
-	if _, ok := b.Get("nodes", "web"); ok {
+	mustPut(t, a, "nodes", "web", `{}`)
+	if _, ok, _ := b.Get("nodes", "web"); ok {
 		t.Fatal("orgs must not share data")
+	}
+}
+
+func mustCreateOrg(t *testing.T, s *Store, name string) {
+	t.Helper()
+	if _, err := s.CreateOrg(name); err != nil {
+		t.Fatalf("CreateOrg(%q): %v", name, err)
+	}
+}
+
+func mustPut(t *testing.T, org *Org, coll, key, val string) {
+	t.Helper()
+	if err := org.Put(coll, key, []byte(val)); err != nil {
+		t.Fatalf("Put(%q,%q): %v", coll, key, err)
 	}
 }

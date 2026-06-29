@@ -41,10 +41,10 @@ func TestLoadGlobalUsers(t *testing.T) {
 	if sum.Users != 2 {
 		t.Fatalf("Users = %d, want 2", sum.Users)
 	}
-	if _, ok := st.Global().Get("users", "anna"); !ok {
+	if _, ok := mustGet(t, st.Global(), "users", "anna"); !ok {
 		t.Error("user anna not stored in global space")
 	}
-	if _, ok := st.Global().Get("users", "ben"); !ok {
+	if _, ok := mustGet(t, st.Global(), "users", "ben"); !ok {
 		t.Error("user ben not stored in global space")
 	}
 }
@@ -65,7 +65,10 @@ func TestLoadCreatesOrgAndChefObjects(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	org, ok := st.Org("acme")
+	org, ok, err := st.Org("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("org acme was not created")
 	}
@@ -74,12 +77,12 @@ func TestLoadCreatesOrgAndChefObjects(t *testing.T) {
 		"roles":        "web",
 		"environments": "production",
 	} {
-		if _, ok := org.Get(coll, key); !ok {
+		if _, ok := mustGet(t, org, coll, key); !ok {
 			t.Errorf("%s/%s not loaded", coll, key)
 		}
 	}
 	// CreateOrganization seeds the _default environment.
-	if _, ok := org.Get("environments", "_default"); !ok {
+	if _, ok := mustGet(t, org, "environments", "_default"); !ok {
 		t.Error("_default environment not seeded for created org")
 	}
 }
@@ -96,8 +99,11 @@ func TestLoadGroups(t *testing.T) {
 	if _, err := Load(st, dir); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	org, _ := st.Org("acme")
-	if _, ok := org.Get("groups", "devs"); !ok {
+	org, _, err := st.Org("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := mustGet(t, org, "groups", "devs"); !ok {
 		t.Error("group devs not loaded")
 	}
 }
@@ -118,8 +124,11 @@ func TestLoadIntoExistingOrg(t *testing.T) {
 	if _, err := Load(st, dir); err != nil {
 		t.Fatalf("Load into existing org: %v", err)
 	}
-	org, _ := st.Org("acme")
-	if _, ok := org.Get("nodes", "db01"); !ok {
+	org, _, err := st.Org("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := mustGet(t, org, "nodes", "db01"); !ok {
 		t.Error("node db01 not loaded into pre-existing org")
 	}
 }
@@ -137,18 +146,24 @@ func TestLoadMultipleOrgs(t *testing.T) {
 	if _, err := Load(st, dir); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	acme, ok := st.Org("acme")
+	acme, ok, err := st.Org("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("org acme missing")
 	}
-	other, ok := st.Org("other")
+	other, ok, err := st.Org("other")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("org other missing")
 	}
-	if _, ok := acme.Get("nodes", "a"); !ok {
+	if _, ok := mustGet(t, acme, "nodes", "a"); !ok {
 		t.Error("acme node a missing")
 	}
-	if _, ok := other.Get("nodes", "b"); !ok {
+	if _, ok := mustGet(t, other, "nodes", "b"); !ok {
 		t.Error("other node b missing")
 	}
 }

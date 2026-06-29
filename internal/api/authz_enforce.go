@@ -71,17 +71,33 @@ func (a *API) authorize(w http.ResponseWriter, r *http.Request) bool {
 	if !check.global {
 		// classifyRequest only succeeds for org-scoped paths, so parts[1] is the org.
 		orgName := strings.Split(strings.Trim(r.URL.Path, "/"), "/")[1]
-		if org, ok = a.store.Org(orgName); !ok {
+		var err error
+		org, ok, err = a.store.Org(orgName)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return false
+		}
+		if !ok {
 			return true // unknown org: let the handler emit its own 404
 		}
 	}
 	if check.existColl != "" {
-		if _, ok := org.Get(check.existColl, check.existKey); !ok {
+		_, ok, err := org.Get(check.existColl, check.existKey)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return false
+		}
+		if !ok {
 			writeError(w, http.StatusNotFound, check.existMsg)
 			return false
 		}
 	}
-	if !actorAllowed(org, actor, check.aclType, check.aclName, check.perm) {
+	allowed, err := actorAllowed(org, actor, check.aclType, check.aclName, check.perm)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return false
+	}
+	if !allowed {
 		writeError(w, http.StatusForbidden, "missing "+check.perm+" permission")
 		return false
 	}
@@ -330,16 +346,18 @@ type Actor struct {
 // nested group membership transitively (a group that lists another group in its
 // groups[] inherits that group's members). Cycles terminate because a group is
 // only ever added to the result once.
-func actorGroups(org *store.Org, actor Actor) map[string]bool {
+func actorGroups(org *store.Org, actor Actor) (map[string]bool, error) {
 	type rec struct{ users, clients, groups []string }
 	all := map[string]rec{}
-	org.Range("groups", func(name string, raw []byte) bool {
+	if err := org.Range("groups", func(name string, raw []byte) bool {
 		var g map[string]any
 		if json.Unmarshal(raw, &g) == nil {
 			all[name] = rec{anyStrings(g["users"]), anyStrings(g["clients"]), anyStrings(g["groups"])}
 		}
 		return true
-	})
+	}); err != nil {
+		return nil, err
+	}
 
 	member := map[string]bool{}
 	var queue []string
@@ -370,32 +388,38 @@ func actorGroups(org *store.Org, actor Actor) map[string]bool {
 			}
 		}
 	}
-	return member
+	return member, nil
 }
 
 // actorAllowed reports whether the actor holds perm on the object identified by
 // aclType/aclName, via a direct actor entry or any group it transitively
 // belongs to.
-func actorAllowed(org *store.Org, actor Actor, aclType, aclName, perm string) bool {
-	acl := loadACL(org, aclType, aclName)
+func actorAllowed(org *store.Org, actor Actor, aclType, aclName, perm string) (bool, error) {
+	acl, err := loadACL(org, aclType, aclName)
+	if err != nil {
+		return false, err
+	}
 	ace, _ := acl[perm].(map[string]any)
 	if ace == nil {
-		return false
+		return false, nil
 	}
 	if slices.Contains(anyStrings(ace["actors"]), actor.Name) {
-		return true
+		return true, nil
 	}
 	groups := anyStrings(ace["groups"])
 	if len(groups) == 0 {
-		return false
+		return false, nil
 	}
-	member := actorGroups(org, actor)
+	member, err := actorGroups(org, actor)
+	if err != nil {
+		return false, err
+	}
 	for _, g := range groups {
 		if member[g] {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // anyStrings coerces a JSON-decoded array into a []string. It accepts both
