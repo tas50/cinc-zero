@@ -94,8 +94,9 @@ curl -X POST http://127.0.0.1:8889/authenticate_user \
 
 ## Connecting cinc-console
 
-[cinc-console](https://github.com/cinc-project) (the Cinc build of Chef Manage)
-signs requests on a user's behalf using the **webui key** via the
+[cinc-console](https://github.com/tas50/cinc-console) (a web management console
+for Chef Infra Server) signs requests on a user's behalf using the **webui key**
+via the
 `X-Ops-Request-Source: web` mechanism, which cinc-zero supports. By default the
 webui key **is** the bootstrap admin key, i.e. the `dev-admin.pem` written above —
 no extra setup. (To use a distinct key instead, pass `--webui-key <path>`.)
