@@ -22,13 +22,15 @@ const PasswordsCollection = "passwords"
 // StashPassword moves a "password" field out of an actor object into the
 // out-of-band password store, so it is neither persisted in nor returned with
 // the actor record. It reports whether a password was present.
-func StashPassword(org *store.Org, name string, obj map[string]any) bool {
+func StashPassword(org *store.Org, name string, obj map[string]any) (bool, error) {
 	if pw, ok := obj["password"].(string); ok {
-		org.Put(PasswordsCollection, name, []byte(pw))
+		if err := org.Put(PasswordsCollection, name, []byte(pw)); err != nil {
+			return false, err
+		}
 		delete(obj, "password")
-		return true
+		return true, nil
 	}
-	return false
+	return false, nil
 }
 
 func (a *API) registerAuthenticateRoutes(mux *http.ServeMux) {
@@ -62,12 +64,20 @@ func (a *API) authenticateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	global := a.store.Global()
-	userRaw, ok := global.Get("users", name)
+	userRaw, ok, err := global.Get("users", name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "Failed to authenticate. Username and password incorrect.")
 		return
 	}
-	stored, ok := global.Get(PasswordsCollection, name)
+	stored, ok, err := global.Get(PasswordsCollection, name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok || subtle.ConstantTimeCompare(stored, []byte(body.Password)) != 1 {
 		writeError(w, http.StatusUnauthorized, "Failed to authenticate. Username and password incorrect.")
 		return

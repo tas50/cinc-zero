@@ -80,12 +80,17 @@ func TestInviteConsumed(t *testing.T) {
 func TestInviterLostAuthority(t *testing.T) {
 	srv, st := newTestAPI(t)
 	do(t, "POST", srv.URL+"/users", `{"name":"grace"}`)
-	org, ok := st.Org("acme")
+	org, ok, err := st.Org("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("acme org missing")
 	}
 	id := "grace-acme"
-	org.Put(assocReqColl, id, []byte(`{"id":"grace-acme","username":"grace","orgname":"acme","inviter":"ghostboss"}`))
+	if err := org.Put(assocReqColl, id, []byte(`{"id":"grace-acme","username":"grace","orgname":"acme","inviter":"ghostboss"}`)); err != nil {
+		t.Fatal(err)
+	}
 
 	resp, body := do(t, "PUT", srv.URL+"/users/grace/association_requests/"+id, `{"response":"accept"}`)
 	if resp.StatusCode != 403 {

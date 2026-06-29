@@ -29,34 +29,41 @@ func (a *API) registerEnvironmentSubRoutes(mux *http.ServeMux) {
 
 // envExists reports whether an environment exists. The "_default" environment
 // is guaranteed by Chef to always exist, even if it was never explicitly stored.
-func envExists(org *store.Org, env string) bool {
+func envExists(org *store.Org, env string) (bool, error) {
 	if env == "_default" {
-		return true
+		return true, nil
 	}
-	_, ok := org.Get("environments", env)
-	return ok
+	_, ok, err := org.Get("environments", env)
+	return ok, err
 }
 
 // envConstraints returns the environment's cookbook version constraints. The
 // bool is false only when the environment does not exist; "_default" always
 // exists and carries no constraints unless one was explicitly stored.
-func envConstraints(org *store.Org, env string) (map[string]string, bool) {
-	raw, ok := org.Get("environments", env)
+func envConstraints(org *store.Org, env string) (map[string]string, bool, error) {
+	raw, ok, err := org.Get("environments", env)
+	if err != nil {
+		return nil, false, err
+	}
 	if !ok {
-		return nil, env == "_default"
+		return nil, env == "_default", nil
 	}
 	var doc struct {
 		CookbookVersions map[string]string `json:"cookbook_versions"`
 	}
 	json.Unmarshal(raw, &doc)
-	return doc.CookbookVersions, true
+	return doc.CookbookVersions, true, nil
 }
 
 // filteredCookbookVersions returns cookbook -> versions (newest first) limited
 // to versions satisfying the environment's constraint for that cookbook.
-func filteredCookbookVersions(org *store.Org, constraints map[string]string) map[string][]string {
+func filteredCookbookVersions(org *store.Org, constraints map[string]string) (map[string][]string, error) {
+	cv, err := cookbookVersions(org)
+	if err != nil {
+		return nil, err
+	}
 	out := map[string][]string{}
-	for name, versions := range cookbookVersions(org) {
+	for name, versions := range cv {
 		constraint := constraints[name]
 		var kept []string
 		for _, v := range versions {
@@ -68,7 +75,7 @@ func filteredCookbookVersions(org *store.Org, constraints map[string]string) map
 			out[name] = kept
 		}
 	}
-	return out
+	return out, nil
 }
 
 func (a *API) envCookbooks(w http.ResponseWriter, r *http.Request) {
@@ -76,12 +83,21 @@ func (a *API) envCookbooks(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	constraints, ok := envConstraints(org, r.PathValue("env"))
+	constraints, ok, err := envConstraints(org, r.PathValue("env"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find environment "+r.PathValue("env"))
 		return
 	}
-	writeJSON(w, http.StatusOK, collectionListBody(r, org, "cookbooks", "version", filteredCookbookVersions(org, constraints)))
+	fcv, err := filteredCookbookVersions(org, constraints)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, collectionListBody(r, org, "cookbooks", "version", fcv))
 }
 
 func (a *API) envCookbook(w http.ResponseWriter, r *http.Request) {
@@ -89,13 +105,21 @@ func (a *API) envCookbook(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	constraints, ok := envConstraints(org, r.PathValue("env"))
+	constraints, ok, err := envConstraints(org, r.PathValue("env"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find environment "+r.PathValue("env"))
 		return
 	}
 	name := r.PathValue("name")
-	all := filteredCookbookVersions(org, constraints)
+	all, err := filteredCookbookVersions(org, constraints)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	versions, ok := all[name]
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find a cookbook named "+name)
@@ -109,15 +133,28 @@ func (a *API) envRecipes(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	constraints, ok := envConstraints(org, r.PathValue("env"))
+	constraints, ok, err := envConstraints(org, r.PathValue("env"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find environment "+r.PathValue("env"))
 		return
 	}
+	fcv, err := filteredCookbookVersions(org, constraints)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	seen := map[string]bool{}
 	var recipes []string
-	for name, versions := range filteredCookbookVersions(org, constraints) {
-		raw, ok := org.Get("cookbooks", cookbookKey(name, versions[0])) // newest first
+	for name, versions := range fcv {
+		raw, ok, err := org.Get("cookbooks", cookbookKey(name, versions[0])) // newest first
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		if !ok {
 			continue
 		}
@@ -142,12 +179,17 @@ func (a *API) envNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	env := r.PathValue("env")
-	if !envExists(org, env) {
+	exists, err := envExists(org, env)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !exists {
 		writeError(w, http.StatusNotFound, "Cannot find environment "+env)
 		return
 	}
 	out := map[string]string{}
-	org.Range("nodes", func(name string, raw []byte) bool {
+	if err := org.Range("nodes", func(name string, raw []byte) bool {
 		var node struct {
 			ChefEnvironment string `json:"chef_environment"`
 		}
@@ -160,7 +202,10 @@ func (a *API) envNodes(w http.ResponseWriter, r *http.Request) {
 			out[name] = objectURL(r, org.Name(), "nodes", name)
 		}
 		return true
-	})
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -175,7 +220,11 @@ func (a *API) envCookbookVersions(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	constraints, ok := envConstraints(org, r.PathValue("env"))
+	constraints, ok, err := envConstraints(org, r.PathValue("env"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find environment "+r.PathValue("env"))
 		return
@@ -188,7 +237,11 @@ func (a *API) envCookbookVersions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	available := filteredCookbookVersions(org, constraints)
+	available, err := filteredCookbookVersions(org, constraints)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	solved := map[string]any{}
 	queue := make([]string, 0, len(body.RunList))
 	for _, item := range body.RunList {
@@ -207,7 +260,11 @@ func (a *API) envCookbookVersions(w http.ResponseWriter, r *http.Request) {
 				"Run list contains invalid items: no versions match the constraints on cookbook "+name+".")
 			return
 		}
-		raw, ok := org.Get("cookbooks", cookbookKey(name, versions[0]))
+		raw, ok, err := org.Get("cookbooks", cookbookKey(name, versions[0]))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		if !ok {
 			writeError(w, http.StatusPreconditionFailed, "Cannot find cookbook "+name)
 			return
@@ -230,7 +287,12 @@ func (a *API) envRole(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	if !envExists(org, r.PathValue("env")) {
+	exists, err := envExists(org, r.PathValue("env"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !exists {
 		writeError(w, http.StatusNotFound, "Cannot find environment "+r.PathValue("env"))
 		return
 	}
@@ -275,7 +337,11 @@ func (a *API) roleEnvironment(w http.ResponseWriter, r *http.Request) {
 }
 
 func loadRole(w http.ResponseWriter, org *store.Org, name string) (map[string]any, bool) {
-	raw, ok := org.Get("roles", name)
+	raw, ok, err := org.Get("roles", name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return nil, false
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find role "+name)
 		return nil, false

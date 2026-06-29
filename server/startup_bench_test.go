@@ -22,11 +22,17 @@ func TestServerNewMultiOrgValidatorKeysMatch(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parse validator key for %q: %v", name, err)
 		}
-		org, ok := s.Store().Org(name)
+		org, ok, err := s.Store().Org(name)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !ok {
 			t.Fatalf("org %q missing", name)
 		}
-		raw, ok := org.Get("clients", name+"-validator")
+		raw, ok, err := org.Get("clients", name+"-validator")
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !ok {
 			t.Fatalf("validator client missing for %q", name)
 		}

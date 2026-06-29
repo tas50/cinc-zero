@@ -12,65 +12,67 @@ func TestBlobStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if org.HasBlob("abc123") {
-		t.Fatal("blob should not exist yet")
+	if has, err := org.HasBlob("abc123"); err != nil || has {
+		t.Fatalf("blob should not exist yet: has=%v err=%v", has, err)
 	}
-	if _, ok := org.Blob("abc123"); ok {
-		t.Fatal("Blob returned ok for missing checksum")
+	if _, ok, err := org.Blob("abc123"); err != nil || ok {
+		t.Fatalf("Blob returned ok for missing checksum: ok=%v err=%v", ok, err)
 	}
 
 	content := []byte("file content\n")
-	org.PutBlob("abc123", content)
-
-	if !org.HasBlob("abc123") {
-		t.Fatal("blob should exist after PutBlob")
+	if err := org.PutBlob("abc123", content); err != nil {
+		t.Fatal(err)
 	}
-	got, ok := org.Blob("abc123")
-	if !ok || !bytes.Equal(got, content) {
-		t.Fatalf("Blob = %q, %v; want %q", got, ok, content)
+
+	if has, err := org.HasBlob("abc123"); err != nil || !has {
+		t.Fatalf("blob should exist after PutBlob: has=%v err=%v", has, err)
+	}
+	got, ok, err := org.Blob("abc123")
+	if err != nil || !ok || !bytes.Equal(got, content) {
+		t.Fatalf("Blob = %q, ok=%v err=%v; want %q", got, ok, err, content)
 	}
 
 	// Stored value is a defensive copy: mutating the input must not change it.
 	content[0] = 'X'
-	got, _ = org.Blob("abc123")
+	got, _, _ = org.Blob("abc123")
 	if got[0] == 'X' {
 		t.Fatal("PutBlob did not copy input")
 	}
 	// And mutating the returned slice must not change the stored value.
 	got[1] = 'Y'
-	again, _ := org.Blob("abc123")
+	again, _, _ := org.Blob("abc123")
 	if again[1] == 'Y' {
 		t.Fatal("Blob did not return a copy")
 	}
 
 	// Blobs are org-scoped.
 	other, _ := st.CreateOrg("other")
-	if other.HasBlob("abc123") {
+	if has, _ := other.HasBlob("abc123"); has {
 		t.Fatal("blobs leaked across orgs")
 	}
 }
 
-func TestBlobViewReturnsReferenceNotCopy(t *testing.T) {
+// TestBlobViewReturnsIndependentCopy documents BlobView's contract under the
+// pluggable backend: it returns an owned copy (no zero-copy fast path), so
+// mutating the result must not affect stored state.
+func TestBlobViewReturnsIndependentCopy(t *testing.T) {
 	st := New()
 	org, _ := st.CreateOrg("acme")
-	org.PutBlob("abc123", []byte("file content\n"))
-
-	got, ok := org.BlobView("abc123")
-	if !ok || string(got) != "file content\n" {
-		t.Fatalf("BlobView = %q, %v", got, ok)
+	if err := org.PutBlob("abc123", []byte("file content\n")); err != nil {
+		t.Fatal(err)
 	}
-	if _, ok := org.BlobView("missing"); ok {
+
+	got, ok, err := org.BlobView("abc123")
+	if err != nil || !ok || string(got) != "file content\n" {
+		t.Fatalf("BlobView = %q, ok=%v err=%v", got, ok, err)
+	}
+	if _, ok, _ := org.BlobView("missing"); ok {
 		t.Fatal("BlobView of missing checksum should report false")
 	}
 
-	// BlobView returns the backing slice directly; Blob copies.
-	a, _ := org.BlobView("abc123")
-	b, _ := org.BlobView("abc123")
-	if &a[0] != &b[0] {
-		t.Fatal("BlobView should return the backing slice without copying")
-	}
-	c, _ := org.Blob("abc123")
-	if &a[0] == &c[0] {
-		t.Fatal("Blob should return a defensive copy distinct from BlobView")
+	got[0] = 'X'
+	again, _, _ := org.BlobView("abc123")
+	if again[0] == 'X' {
+		t.Fatal("BlobView result aliased stored value")
 	}
 }

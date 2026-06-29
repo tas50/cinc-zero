@@ -105,14 +105,16 @@ type match struct {
 // without decoding or flattening any of them. This is the match-all (*:*) fast
 // path for whole-object results: the field map is never consulted, so the
 // dominant flatten cost is skipped entirely.
-func (a *API) collectAll(org *store.Org, idx searchIndex) []match {
+func (a *API) collectAll(org *store.Org, idx searchIndex) ([]match, error) {
 	var matches []match
-	org.Range(idx.collection, func(id string, raw []byte) bool {
+	if err := org.Range(idx.collection, func(id string, raw []byte) bool {
 		matches = append(matches, match{id: id, raw: raw})
 		return true
-	})
+	}); err != nil {
+		return nil, err
+	}
 	sort.Slice(matches, func(i, j int) bool { return matches[i].id < matches[j].id })
-	return matches
+	return matches, nil
 }
 
 // collectMatches scans an index's collection and returns the documents matching
@@ -122,14 +124,14 @@ func (a *API) collectAll(org *store.Org, idx searchIndex) []match {
 // workers. Documents are read copy-free and the flatten cache it populates makes
 // later scans cheap. Splitting the work this way keeps warm scans free of any
 // goroutine overhead while still parallelizing the cold flatten.
-func (a *API) collectMatches(org *store.Org, idx searchIndex, query search.Query) []match {
+func (a *API) collectMatches(org *store.Org, idx searchIndex, query search.Query) ([]match, error) {
 	type doc struct {
 		id  string
 		raw []byte
 	}
 	var matches []match
 	var misses []doc
-	org.Range(idx.collection, func(id string, raw []byte) bool {
+	if err := org.Range(idx.collection, func(id string, raw []byte) bool {
 		if fields, ok := a.searchDocCached(idx.collection, id, raw); ok {
 			if query.Matches(fields) {
 				matches = append(matches, match{id: id, raw: raw})
@@ -140,7 +142,9 @@ func (a *API) collectMatches(org *store.Org, idx searchIndex, query search.Query
 			misses = append(misses, doc{id, raw})
 		}
 		return true
-	})
+	}); err != nil {
+		return nil, err
+	}
 
 	if len(misses) > 0 {
 		hit := make([]bool, len(misses))
@@ -158,7 +162,7 @@ func (a *API) collectMatches(org *store.Org, idx searchIndex, query search.Query
 	}
 
 	sort.Slice(matches, func(i, j int) bool { return matches[i].id < matches[j].id })
-	return matches
+	return matches, nil
 }
 
 // parallelFor runs fn for each index 0..n-1. Small scans run serially to avoid
@@ -221,7 +225,12 @@ func (a *API) listSearchIndexes(w http.ResponseWriter, r *http.Request) {
 		"client":      base + "client",
 		"environment": base + "environment",
 	}
-	for _, bag := range org.Keys(dataBagsColl) {
+	keys, err := org.Keys(dataBagsColl)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for _, bag := range keys {
 		out[bag] = base + bag
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -234,7 +243,7 @@ type searchIndex struct {
 	urlFor     func(r *http.Request, org, id string) string
 }
 
-func (a *API) resolveIndex(r *http.Request, org *store.Org, name string) (searchIndex, bool) {
+func (a *API) resolveIndex(r *http.Request, org *store.Org, name string) (searchIndex, bool, error) {
 	switch name {
 	case "node", "role", "client", "environment":
 		coll := name + "s"
@@ -242,15 +251,19 @@ func (a *API) resolveIndex(r *http.Request, org *store.Org, name string) (search
 			collection: coll,
 			mergeAttrs: name == "node",
 			urlFor:     func(r *http.Request, org, id string) string { return objectURL(r, org, coll, id) },
-		}, true
+		}, true, nil
 	default:
-		if _, ok := org.View(dataBagsColl, name); !ok {
-			return searchIndex{}, false
+		_, ok, err := org.View(dataBagsColl, name)
+		if err != nil {
+			return searchIndex{}, false, err
+		}
+		if !ok {
+			return searchIndex{}, false, nil
 		}
 		return searchIndex{
 			collection: dataBagItemsColl(name),
 			urlFor:     func(r *http.Request, org, id string) string { return dataBagURL(r, org, name) + "/" + id },
-		}, true
+		}, true, nil
 	}
 }
 
@@ -260,7 +273,11 @@ func (a *API) runSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	indexName := r.PathValue("index")
-	idx, ok := a.resolveIndex(r, org, indexName)
+	idx, ok, err := a.resolveIndex(r, org, indexName)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "I don't know how to search for "+indexName+" data objects.")
 		return
@@ -291,9 +308,13 @@ func (a *API) runSearch(w http.ResponseWriter, r *http.Request) {
 	// projection, which needs the merged view) flattens and filters.
 	var matches []match
 	if partial == nil && search.IsMatchAll(query) {
-		matches = a.collectAll(org, idx)
+		matches, err = a.collectAll(org, idx)
 	} else {
-		matches = a.collectMatches(org, idx, query)
+		matches, err = a.collectMatches(org, idx, query)
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 
 	start := queryInt(r, "start", 0)

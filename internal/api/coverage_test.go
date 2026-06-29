@@ -119,34 +119,57 @@ func TestInviterAuthorized(t *testing.T) {
 	seedAuthz(org)
 	a := New(st)
 
-	if !a.inviterAuthorized(org, "") {
+	authorized, err := a.inviterAuthorized(org, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !authorized {
 		t.Error("empty inviter (no authenticated actor) should be authorized")
 	}
-	if a.inviterAuthorized(org, "ghost") {
+
+	if authorized, err = a.inviterAuthorized(org, "ghost"); err != nil {
+		t.Fatal(err)
+	} else if authorized {
 		t.Error("unknown inviter should not be authorized")
 	}
 
 	// A global admin is always authorized, even without org membership.
-	st.Global().Put("users", "root", []byte(`{"username":"root","admin":true}`))
-	if !a.inviterAuthorized(org, "root") {
+	if err = st.Global().Put("users", "root", []byte(`{"username":"root","admin":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	if authorized, err = a.inviterAuthorized(org, "root"); err != nil {
+		t.Fatal(err)
+	} else if !authorized {
 		t.Error("global-admin inviter should be authorized")
 	}
 
 	// A non-admin user that is not an org member is not authorized.
-	st.Global().Put("users", "alice", []byte(`{"username":"alice"}`))
-	if a.inviterAuthorized(org, "alice") {
+	if err = st.Global().Put("users", "alice", []byte(`{"username":"alice"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if authorized, err = a.inviterAuthorized(org, "alice"); err != nil {
+		t.Fatal(err)
+	} else if authorized {
 		t.Error("non-member inviter should not be authorized")
 	}
 
 	// Associated, but not in the admins group: still not authorized.
-	org.Put(assocColl, "alice", []byte(`{"username":"alice"}`))
-	if a.inviterAuthorized(org, "alice") {
+	if err = org.Put(assocColl, "alice", []byte(`{"username":"alice"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if authorized, err = a.inviterAuthorized(org, "alice"); err != nil {
+		t.Fatal(err)
+	} else if authorized {
 		t.Error("inviter outside the admins group should not be authorized")
 	}
 
 	// Now an admins-group member: authorized.
-	org.Put("groups", "admins", mustEncode(groupDoc("admins", []string{"alice"}, nil, nil)))
-	if !a.inviterAuthorized(org, "alice") {
+	if err = org.Put("groups", "admins", mustEncode(groupDoc("admins", []string{"alice"}, nil, nil))); err != nil {
+		t.Fatal(err)
+	}
+	if authorized, err = a.inviterAuthorized(org, "alice"); err != nil {
+		t.Fatal(err)
+	} else if !authorized {
 		t.Error("admins-group member inviter should be authorized")
 	}
 }

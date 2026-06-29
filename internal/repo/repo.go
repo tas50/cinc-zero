@@ -104,7 +104,9 @@ func loadObjects(org *store.Org, dir, collection, nameField string) (int, error)
 		if err != nil {
 			return 0, err
 		}
-		org.Put(collection, objectKey(obj, nameField, path), raw)
+		if err := org.Put(collection, objectKey(obj, nameField, path), raw); err != nil {
+			return 0, err
+		}
 		count++
 	}
 	return count, nil
@@ -131,7 +133,9 @@ func loadPolicies(org *store.Org, dir string) (int, error) {
 		if name == "" || rev == "" {
 			return 0, fmt.Errorf(`%s: policy lock needs both "name" and "revision_id"`, path)
 		}
-		org.Put(policyRevColl(name), rev, raw)
+		if err := org.Put(policyRevColl(name), rev, raw); err != nil {
+			return 0, err
+		}
 		count++
 	}
 	return count, nil
@@ -152,7 +156,9 @@ func loadDataBags(org *store.Org, dir string) (bags, items int, err error) {
 			continue
 		}
 		bag := e.Name()
-		org.Put(dataBagsColl, bag, fmt.Appendf(nil, `{"name":%q}`, bag))
+		if err := org.Put(dataBagsColl, bag, fmt.Appendf(nil, `{"name":%q}`, bag)); err != nil {
+			return 0, 0, err
+		}
 		bags++
 
 		files, err := jsonFiles(filepath.Join(dir, bag))
@@ -164,7 +170,9 @@ func loadDataBags(org *store.Org, dir string) (bags, items int, err error) {
 			if err != nil {
 				return 0, 0, err
 			}
-			org.Put(dataBagItemsColl(bag), objectKey(obj, "id", path), raw)
+			if err := org.Put(dataBagItemsColl(bag), objectKey(obj, "id", path), raw); err != nil {
+				return 0, 0, err
+			}
 			items++
 		}
 	}

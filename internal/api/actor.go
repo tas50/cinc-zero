@@ -84,11 +84,17 @@ func (a *API) createActor(segment string, scope scopeFunc) http.HandlerFunc {
 		// authenticate_user). Strip the transient/nested fields.
 		delete(obj, "chef_key")
 		delete(obj, "private_key")
-		StashPassword(org, name, obj)
+		if _, err := StashPassword(org, name, obj); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 
 		raw := mustEncode(obj)
 		if err := org.Create(segment, name, raw); errors.Is(err, store.ErrConflict) {
 			writeError(w, http.StatusConflict, "Object already exists")
+			return
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		writeJSON(w, http.StatusCreated, resp)
@@ -117,17 +123,20 @@ func bodyPublicKey(obj map[string]any) string {
 
 // storedPublicKey returns the public key already stored for an actor, or "" if
 // the actor does not exist or carries no key.
-func storedPublicKey(org *store.Org, segment, name string) string {
-	raw, ok := org.Get(segment, name)
+func storedPublicKey(org *store.Org, segment, name string) (string, error) {
+	raw, ok, err := org.Get(segment, name)
+	if err != nil {
+		return "", err
+	}
 	if !ok {
-		return ""
+		return "", nil
 	}
 	var prev map[string]any
 	if json.Unmarshal(raw, &prev) != nil {
-		return ""
+		return "", nil
 	}
 	pub, _ := prev["public_key"].(string)
-	return pub
+	return pub, nil
 }
 
 func (a *API) scopedList(segment string, scope scopeFunc) http.HandlerFunc {
@@ -150,8 +159,18 @@ func (a *API) scopedList(segment string, scope scopeFunc) http.HandlerFunc {
 		}
 
 		out := map[string]string{}
-		for _, name := range org.Keys(segment) {
-			if !actorMatchesFilters(org, segment, name, filters) {
+		keys, err := org.Keys(segment)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		for _, name := range keys {
+			match, err := actorMatchesFilters(org, segment, name, filters)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if !match {
 				continue
 			}
 			out[name] = objectURL(r, orgSegment(r), segment, name)
@@ -163,24 +182,27 @@ func (a *API) scopedList(segment string, scope scopeFunc) http.HandlerFunc {
 // actorMatchesFilters reports whether the stored actor document satisfies every
 // supplied exact-match filter. With no filters it always matches; a missing or
 // unparseable record matches nothing.
-func actorMatchesFilters(org *store.Org, segment, name string, filters map[string]string) bool {
+func actorMatchesFilters(org *store.Org, segment, name string, filters map[string]string) (bool, error) {
 	if len(filters) == 0 {
-		return true
+		return true, nil
 	}
-	raw, ok := org.Get(segment, name)
+	raw, ok, err := org.Get(segment, name)
+	if err != nil {
+		return false, err
+	}
 	if !ok {
-		return false
+		return false, nil
 	}
 	var doc map[string]any
 	if json.Unmarshal(raw, &doc) != nil {
-		return false
+		return false, nil
 	}
 	for field, want := range filters {
 		if got, _ := doc[field].(string); got != want {
-			return false
+			return false, nil
 		}
 	}
-	return true
+	return true, nil
 }
 
 func (a *API) scopedGet(segment string, scope scopeFunc) http.HandlerFunc {
@@ -189,7 +211,11 @@ func (a *API) scopedGet(segment string, scope scopeFunc) http.HandlerFunc {
 		if org == nil {
 			return
 		}
-		raw, ok := org.Get(segment, r.PathValue("name"))
+		raw, ok, err := org.Get(segment, r.PathValue("name"))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		if !ok {
 			writeError(w, http.StatusNotFound, "Cannot find "+segment+" "+r.PathValue("name"))
 			return
@@ -217,15 +243,26 @@ func (a *API) scopedPut(segment string, scope scopeFunc) http.HandlerFunc {
 		// normalizing a nested chef_key to the top-level field either way.
 		pub := bodyPublicKey(obj)
 		if pub == "" {
-			pub = storedPublicKey(org, segment, name)
+			stored, err := storedPublicKey(org, segment, name)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			pub = stored
 		}
 		delete(obj, "chef_key")
 		if pub != "" {
 			obj["public_key"] = pub
 		}
-		StashPassword(org, name, obj)
+		if _, err := StashPassword(org, name, obj); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		raw := mustEncode(obj)
-		org.Put(segment, name, raw)
+		if err := org.Put(segment, name, raw); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		writeRaw(w, http.StatusOK, raw)
 	}
 }
@@ -236,7 +273,11 @@ func (a *API) scopedDelete(segment string, scope scopeFunc) http.HandlerFunc {
 		if org == nil {
 			return
 		}
-		raw, ok := org.Delete(segment, r.PathValue("name"))
+		raw, ok, err := org.Delete(segment, r.PathValue("name"))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		if !ok {
 			writeError(w, http.StatusNotFound, "Cannot find "+segment+" "+r.PathValue("name"))
 			return

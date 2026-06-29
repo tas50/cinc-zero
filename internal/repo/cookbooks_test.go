@@ -33,7 +33,10 @@ func TestLoadCookbookWithMetadataRB(t *testing.T) {
 		t.Fatalf("cookbook count = %+v", sum.Counts)
 	}
 
-	raw, ok := org.Get("cookbooks", "apache2/1.2.3")
+	raw, ok, err := org.Get("cookbooks", "apache2/1.2.3")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("cookbook apache2/1.2.3 not stored")
 	}
@@ -65,7 +68,11 @@ func TestLoadCookbookWithMetadataRB(t *testing.T) {
 			if f.Checksum != md5hex(recipe) {
 				t.Fatalf("recipe checksum = %s, want %s", f.Checksum, md5hex(recipe))
 			}
-			if !org.HasBlob(f.Checksum) {
+			has, err := org.HasBlob(f.Checksum)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !has {
 				t.Fatal("recipe content not in blob store")
 			}
 		}
@@ -87,7 +94,10 @@ func TestLoadCookbookParsesLicenseAndDescriptionFromRB(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	raw, ok := org.Get("cookbooks", "apache2/1.2.3")
+	raw, ok, err := org.Get("cookbooks", "apache2/1.2.3")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("cookbook apache2/1.2.3 not stored")
 	}
@@ -120,7 +130,10 @@ func TestLoadCookbookParsesLicenseAndDescriptionFromJSON(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	raw, ok := org.Get("cookbooks", "nginx/2.0.0")
+	raw, ok, err := org.Get("cookbooks", "nginx/2.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("cookbook nginx/2.0.0 not stored")
 	}
@@ -156,7 +169,10 @@ func TestLoadCookbookParsesMaintainerAndURLsFromRB(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	raw, ok := org.Get("cookbooks", "webserver/2.1.0")
+	raw, ok, err := org.Get("cookbooks", "webserver/2.1.0")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("cookbook webserver/2.1.0 not stored")
 	}
@@ -200,7 +216,10 @@ func TestLoadCookbookParsesMaintainerAndURLsFromJSON(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	raw, ok := org.Get("cookbooks", "nginx/2.0.0")
+	raw, ok, err := org.Get("cookbooks", "nginx/2.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("cookbook nginx/2.0.0 not stored")
 	}
@@ -241,7 +260,7 @@ func TestLoadCookbookWithMetadataJSON(t *testing.T) {
 	if _, err := Load(org, dir); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if _, ok := org.Get("cookbooks", "nginx/2.0.0"); !ok {
+	if !getOK(t, org, "cookbooks", "nginx/2.0.0") {
 		t.Fatal("cookbook nginx/2.0.0 (from metadata.json) not stored")
 	}
 }
@@ -257,7 +276,11 @@ func TestLoadCookbookNameFallsBackToDir(t *testing.T) {
 	if _, err := Load(org, dir); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if _, ok := org.Get("cookbooks", "legacy/0.0.0"); !ok {
-		t.Fatalf("cookbook keyed by dir name with default version not stored; keys=%v", org.Keys("cookbooks"))
+	if !getOK(t, org, "cookbooks", "legacy/0.0.0") {
+		keys, err := org.Keys("cookbooks")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Fatalf("cookbook keyed by dir name with default version not stored; keys=%v", keys)
 	}
 }

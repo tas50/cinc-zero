@@ -25,6 +25,7 @@ import (
 	"github.com/tas50/cinc-zero/internal/repo"
 	"github.com/tas50/cinc-zero/internal/state"
 	"github.com/tas50/cinc-zero/internal/store"
+	"github.com/tas50/cinc-zero/internal/store/sqlite"
 )
 
 // Options configures a Server. The zero value is usable: it creates a single
@@ -73,11 +74,23 @@ type Options struct {
 	// handler reads the uploaded file fully into memory). Defaults to 1 GiB; set
 	// a negative value to disable the limit.
 	MaxBodyBytes int64
+	// Storage selects the persistence backend: "memory" (default, ephemeral) or
+	// "sqlite" (durable). Ignored when Backend is set.
+	Storage string
+	// DB is the SQLite database file path; required when Storage is "sqlite".
+	DB string
+	// Backend, when non-nil, is used directly and overrides Storage/DB. It lets
+	// embedding tests inject a specific store.Backend (e.g. a shared in-memory
+	// SQLite DB).
+	Backend store.Backend
 }
 
 func (o *Options) withDefaults() {
 	if o.Addr == "" {
 		o.Addr = "127.0.0.1:0"
+	}
+	if o.Storage == "" {
+		o.Storage = "memory"
 	}
 	if len(o.Orgs) == 0 {
 		o.Orgs = []string{"acme"}
@@ -93,6 +106,30 @@ func (o *Options) withDefaults() {
 	}
 	if o.MaxBodyBytes == 0 {
 		o.MaxBodyBytes = 1 << 30 // 1 GiB
+	}
+}
+
+// buildStore constructs the data store for the given options: an injected Backend
+// if provided, otherwise the selected Storage backend — in-memory by default (the
+// ephemeral "zero" experience) or SQLite (durable) when Storage is "sqlite".
+func buildStore(opts Options) (*store.Store, error) {
+	if opts.Backend != nil {
+		return store.NewWithBackend(opts.Backend), nil
+	}
+	switch opts.Storage {
+	case "memory":
+		return store.New(), nil
+	case "sqlite":
+		if opts.DB == "" {
+			return nil, errors.New(`storage "sqlite" requires a database path (Options.DB / --db)`)
+		}
+		b, err := sqlite.Open(opts.DB)
+		if err != nil {
+			return nil, fmt.Errorf("open sqlite %q: %w", opts.DB, err)
+		}
+		return store.NewWithBackend(b), nil
+	default:
+		return nil, fmt.Errorf("unknown storage %q (want %q or %q)", opts.Storage, "memory", "sqlite")
 	}
 }
 
@@ -121,7 +158,10 @@ func New(opts Options) (*Server, error) {
 	if opts.Repo != "" && opts.StatePath != "" {
 		return nil, errors.New("Repo and StatePath are mutually exclusive; a state directory already subsumes a chef-repo")
 	}
-	st := store.New()
+	st, err := buildStore(opts)
+	if err != nil {
+		return nil, err
+	}
 
 	// RSA-2048 key generation is the dominant startup cost and each key is
 	// independent, so generate the admin key and every org's validator key in
@@ -138,7 +178,9 @@ func New(opts Options) (*Server, error) {
 		return nil, err
 	}
 	adminDoc := fmt.Sprintf(`{"username":%q,"admin":true,"public_key":%q}`, opts.AdminName, string(pubPEM))
-	st.Global().Put("users", opts.AdminName, []byte(adminDoc))
+	if err := st.Global().Put("users", opts.AdminName, []byte(adminDoc)); err != nil {
+		return nil, err
+	}
 
 	// The webui key verifies management-console requests (X-Ops-Request-Source:
 	// web). It defaults to the admin key, so the --key-out key acts as the webui
@@ -162,7 +204,10 @@ func New(opts Options) (*Server, error) {
 
 	// Load a chef-repo into the first organization, if configured.
 	if opts.Repo != "" {
-		org, ok := st.Org(opts.Orgs[0])
+		org, ok, err := st.Org(opts.Orgs[0])
+		if err != nil {
+			return nil, err
+		}
 		if !ok {
 			return nil, fmt.Errorf("repo target org %q not found", opts.Orgs[0])
 		}
@@ -248,12 +293,17 @@ func (s *Server) Start() error {
 	return nil
 }
 
-// Stop gracefully shuts the server down.
+// Stop gracefully shuts the server down and releases the store backend (e.g.
+// closes the SQLite handle).
 func (s *Server) Stop(ctx context.Context) error {
 	if s.httpSrv == nil {
-		return nil
+		return s.store.Close()
 	}
-	return s.httpSrv.Shutdown(ctx)
+	err := s.httpSrv.Shutdown(ctx)
+	if cerr := s.store.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // URL is the base URL the server is listening on (valid after Start).

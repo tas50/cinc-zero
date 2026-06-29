@@ -38,14 +38,18 @@ func (a *API) registerPolicyRoutes(mux *http.ServeMux) {
 }
 
 // policyNames returns the names of policies that currently have revisions.
-func policyNames(org *store.Org) []string {
+func policyNames(org *store.Org) ([]string, error) {
 	var names []string
-	for _, coll := range org.Collections() {
+	colls, err := org.Collections()
+	if err != nil {
+		return nil, err
+	}
+	for _, coll := range colls {
 		if name, ok := strings.CutPrefix(coll, policyRevPrefix); ok {
 			names = append(names, name)
 		}
 	}
-	return names
+	return names, nil
 }
 
 func policyURL(r *http.Request, org, name string) string {
@@ -58,9 +62,19 @@ func (a *API) listPolicies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := map[string]any{}
-	for _, name := range policyNames(org) {
+	names, err := policyNames(org)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for _, name := range names {
 		revs := map[string]any{}
-		for _, rev := range org.Keys(policyRevColl(name)) {
+		keys, err := org.Keys(policyRevColl(name))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		for _, rev := range keys {
 			revs[rev] = map[string]any{}
 		}
 		out[name] = map[string]any{
@@ -77,7 +91,11 @@ func (a *API) getPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	revIDs := org.Keys(policyRevColl(name))
+	revIDs, err := org.Keys(policyRevColl(name))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if len(revIDs) == 0 {
 		writeError(w, http.StatusNotFound, "Cannot find policy "+name)
 		return
@@ -96,7 +114,11 @@ func (a *API) deletePolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	name := r.PathValue("name")
 	coll := policyRevColl(name)
-	revIDs := org.Keys(coll)
+	revIDs, err := org.Keys(coll)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if len(revIDs) == 0 {
 		writeError(w, http.StatusNotFound, "Cannot find policy "+name)
 		return
@@ -104,7 +126,10 @@ func (a *API) deletePolicy(w http.ResponseWriter, r *http.Request) {
 	revs := map[string]any{}
 	for _, rev := range revIDs {
 		revs[rev] = map[string]any{}
-		org.Delete(coll, rev)
+		if _, _, err := org.Delete(coll, rev); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"revisions": revs})
 }
@@ -114,7 +139,11 @@ func (a *API) getPolicyRevision(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	raw, ok := org.Get(policyRevColl(r.PathValue("name")), r.PathValue("rev"))
+	raw, ok, err := org.Get(policyRevColl(r.PathValue("name")), r.PathValue("rev"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find policy revision")
 		return
@@ -139,6 +168,9 @@ func (a *API) createPolicyRevision(w http.ResponseWriter, r *http.Request) {
 	if err := org.Create(policyRevColl(r.PathValue("name")), revID, raw); errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, "Policy revision already exists")
 		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	writeRaw(w, http.StatusCreated, raw)
 }
@@ -148,7 +180,11 @@ func (a *API) deletePolicyRevision(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	raw, ok := org.Delete(policyRevColl(r.PathValue("name")), r.PathValue("rev"))
+	raw, ok, err := org.Delete(policyRevColl(r.PathValue("name")), r.PathValue("rev"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find policy revision")
 		return
@@ -166,23 +202,26 @@ type groupPolicy struct {
 	RevisionID string `json:"revision_id"`
 }
 
-func loadGroup(org *store.Org, name string) (policyGroup, bool) {
-	raw, ok := org.Get(policyGroupsColl, name)
+func loadGroup(org *store.Org, name string) (policyGroup, bool, error) {
+	raw, ok, err := org.Get(policyGroupsColl, name)
+	if err != nil {
+		return policyGroup{}, false, err
+	}
 	if !ok {
-		return policyGroup{}, false
+		return policyGroup{}, false, nil
 	}
 	var g policyGroup
 	if err := json.Unmarshal(raw, &g); err != nil {
-		return policyGroup{}, false
+		return policyGroup{}, false, nil
 	}
 	if g.Policies == nil {
 		g.Policies = map[string]groupPolicy{}
 	}
-	return g, true
+	return g, true, nil
 }
 
-func saveGroup(org *store.Org, name string, g policyGroup) {
-	org.Put(policyGroupsColl, name, mustEncode(g))
+func saveGroup(org *store.Org, name string, g policyGroup) error {
+	return org.Put(policyGroupsColl, name, mustEncode(g))
 }
 
 func (a *API) listPolicyGroups(w http.ResponseWriter, r *http.Request) {
@@ -191,8 +230,17 @@ func (a *API) listPolicyGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := map[string]any{}
-	for _, name := range org.Keys(policyGroupsColl) {
-		g, _ := loadGroup(org, name)
+	keys, err := org.Keys(policyGroupsColl)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for _, name := range keys {
+		g, _, err := loadGroup(org, name)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		out[name] = map[string]any{
 			"uri":      requestBaseURL(r) + "/organizations/" + org.Name() + "/policy_groups/" + name,
 			"policies": g.Policies,
@@ -206,7 +254,11 @@ func (a *API) getPolicyGroup(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	raw, ok := org.Get(policyGroupsColl, r.PathValue("group"))
+	raw, ok, err := org.Get(policyGroupsColl, r.PathValue("group"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find policy group "+r.PathValue("group"))
 		return
@@ -219,7 +271,11 @@ func (a *API) deletePolicyGroup(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	raw, ok := org.Delete(policyGroupsColl, r.PathValue("group"))
+	raw, ok, err := org.Delete(policyGroupsColl, r.PathValue("group"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find policy group "+r.PathValue("group"))
 		return
@@ -232,7 +288,11 @@ func (a *API) getGroupPolicy(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
-	g, ok := loadGroup(org, r.PathValue("group"))
+	g, ok, err := loadGroup(org, r.PathValue("group"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find policy group "+r.PathValue("group"))
 		return
@@ -243,7 +303,11 @@ func (a *API) getGroupPolicy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Policy "+policy+" not in group")
 		return
 	}
-	raw, ok := org.Get(policyRevColl(policy), assoc.RevisionID)
+	raw, ok, err := org.Get(policyRevColl(policy), assoc.RevisionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find policy revision")
 		return
@@ -268,15 +332,25 @@ func (a *API) putGroupPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	policy := r.PathValue("policy")
-	org.Put(policyRevColl(policy), revID, raw)
+	if err := org.Put(policyRevColl(policy), revID, raw); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	groupName := r.PathValue("group")
-	g, ok := loadGroup(org, groupName)
+	g, ok, err := loadGroup(org, groupName)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		g = policyGroup{Policies: map[string]groupPolicy{}}
 	}
 	g.Policies[policy] = groupPolicy{RevisionID: revID}
-	saveGroup(org, groupName, g)
+	if err := saveGroup(org, groupName, g); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	writeRaw(w, http.StatusOK, raw)
 }
@@ -287,7 +361,11 @@ func (a *API) deleteGroupPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	groupName := r.PathValue("group")
-	g, ok := loadGroup(org, groupName)
+	g, ok, err := loadGroup(org, groupName)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find policy group "+groupName)
 		return
@@ -298,9 +376,16 @@ func (a *API) deleteGroupPolicy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Policy "+policy+" not in group")
 		return
 	}
-	raw, _ := org.Get(policyRevColl(policy), assoc.RevisionID)
+	raw, _, err := org.Get(policyRevColl(policy), assoc.RevisionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	delete(g.Policies, policy)
-	saveGroup(org, groupName, g)
+	if err := saveGroup(org, groupName, g); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeRaw(w, http.StatusOK, raw)
 }
 

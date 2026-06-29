@@ -92,7 +92,9 @@ func loadCookbook(org *store.Org, cbDir, dirName string) error {
 
 		sum := md5.Sum(content)
 		checksum := hex.EncodeToString(sum[:])
-		org.PutBlob(checksum, content)
+		if err := org.PutBlob(checksum, content); err != nil {
+			return err
+		}
 		allFiles = append(allFiles, map[string]any{
 			"name":        rel,
 			"path":        rel,
@@ -124,8 +126,7 @@ func loadCookbook(org *store.Org, cbDir, dirName string) error {
 			"dependencies":     meta.dependencies,
 		},
 	}
-	org.Put("cookbooks", meta.name+"/"+meta.version, canonicalize(manifest))
-	return nil
+	return org.Put("cookbooks", meta.name+"/"+meta.version, canonicalize(manifest))
 }
 
 // readCookbookMetadata reads metadata.json if present, else parses metadata.rb,

@@ -17,8 +17,13 @@ import (
 // panicked the handler. A huge start must instead yield an empty window.
 func TestSearchPaginationOverflowNoPanic(t *testing.T) {
 	srv, st := newTestAPI(t)
-	org, _ := st.Org("acme")
-	org.Put("nodes", "n1", []byte(`{"name":"n1"}`))
+	org, _, err := st.Org("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := org.Put("nodes", "n1", []byte(`{"name":"n1"}`)); err != nil {
+		t.Fatal(err)
+	}
 
 	resp, body := do(t, "GET",
 		srv.URL+"/organizations/acme/search/node?q=*:*&start=9223372036854775807&rows=1000", "")
@@ -44,9 +49,14 @@ func TestSearchPaginationOverflowNoPanic(t *testing.T) {
 // so the overflow guard did not change the happy path.
 func TestSearchPaginationWindow(t *testing.T) {
 	srv, st := newTestAPI(t)
-	org, _ := st.Org("acme")
+	org, _, err := st.Org("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, id := range []string{"a", "b", "c", "d"} {
-		org.Put("nodes", id, []byte(`{"name":"`+id+`"}`))
+		if err := org.Put("nodes", id, []byte(`{"name":"`+id+`"}`)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	_, body := do(t, "GET", srv.URL+"/organizations/acme/search/node?q=*:*&start=1&rows=2", "")
 	var res struct {
@@ -122,9 +132,14 @@ func TestGlobalUserKeyURIShape(t *testing.T) {
 // enforcement.
 func TestAssociateUserJoinsUsersGroup(t *testing.T) {
 	srv, st := newTestAPI(t)
-	org, _ := st.Org("acme")
+	org, _, err := st.Org("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
 	seedAuthz(org)
-	st.Global().Put("users", "alice", []byte(`{"username":"alice"}`))
+	if err := st.Global().Put("users", "alice", []byte(`{"username":"alice"}`)); err != nil {
+		t.Fatal(err)
+	}
 
 	if resp, body := do(t, "POST", srv.URL+"/organizations/acme/users", `{"username":"alice"}`); resp.StatusCode != http.StatusCreated {
 		t.Fatalf("associate = %d: %s", resp.StatusCode, body)
@@ -209,14 +224,20 @@ func TestActorPutReplacesPublicKeyWhenProvided(t *testing.T) {
 // unparseable stored value.
 func TestCreateDataBagStoresCanonicalJSON(t *testing.T) {
 	srv, st := newTestAPI(t)
-	org, _ := st.Org("acme")
+	org, _, err := st.Org("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	const name = `a"b`
 	if resp, body := do(t, "POST", srv.URL+"/organizations/acme/data", `{"name":"a\"b"}`); resp.StatusCode != http.StatusCreated {
 		t.Fatalf("create data bag = %d: %s", resp.StatusCode, body)
 	}
 
-	raw, ok := org.Get(dataBagsColl, name)
+	raw, ok, err := org.Get(dataBagsColl, name)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatalf("data bag %q not stored", name)
 	}

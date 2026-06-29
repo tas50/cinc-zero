@@ -36,8 +36,13 @@ func (a *API) listDataBags(w http.ResponseWriter, r *http.Request) {
 	if org == nil {
 		return
 	}
+	bags, err := org.Keys(dataBagsColl)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	out := map[string]string{}
-	for _, bag := range org.Keys(dataBagsColl) {
+	for _, bag := range bags {
 		out[bag] = dataBagURL(r, org.Name(), bag)
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -61,6 +66,9 @@ func (a *API) createDataBag(w http.ResponseWriter, r *http.Request) {
 	if err := org.Create(dataBagsColl, name, mustEncode(map[string]any{"name": name})); errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, "Data bag already exists")
 		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]string{"uri": dataBagURL(r, org.Name(), name)})
 }
@@ -71,22 +79,39 @@ func (a *API) deleteDataBag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bag := r.PathValue("bag")
-	raw, ok := org.Delete(dataBagsColl, bag)
+	raw, ok, err := org.Delete(dataBagsColl, bag)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find data bag "+bag)
 		return
 	}
 	// Remove the bag's items too.
 	items := dataBagItemsColl(bag)
-	for _, id := range org.Keys(items) {
-		org.Delete(items, id)
+	ids, err := org.Keys(items)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for _, id := range ids {
+		if _, _, err := org.Delete(items, id); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	writeRaw(w, http.StatusOK, raw)
 }
 
 // bagExists reports whether the named bag exists, writing a 404 if not.
 func (a *API) bagExists(w http.ResponseWriter, org *store.Org, bag string) bool {
-	if _, ok := org.Get(dataBagsColl, bag); !ok {
+	_, ok, err := org.Get(dataBagsColl, bag)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return false
+	}
+	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find data bag "+bag)
 		return false
 	}
@@ -102,8 +127,13 @@ func (a *API) listDataBagItems(w http.ResponseWriter, r *http.Request) {
 	if !a.bagExists(w, org, bag) {
 		return
 	}
+	ids, err := org.Keys(dataBagItemsColl(bag))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	out := map[string]string{}
-	for _, id := range org.Keys(dataBagItemsColl(bag)) {
+	for _, id := range ids {
 		out[id] = dataBagURL(r, org.Name(), bag) + "/" + id
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -130,6 +160,9 @@ func (a *API) createDataBagItem(w http.ResponseWriter, r *http.Request) {
 	if err := org.Create(dataBagItemsColl(bag), id, raw); errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, "Data bag item already exists")
 		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	writeRaw(w, http.StatusCreated, raw)
 }
@@ -143,7 +176,11 @@ func (a *API) getDataBagItem(w http.ResponseWriter, r *http.Request) {
 	if !a.bagExists(w, org, bag) {
 		return
 	}
-	raw, ok := org.Get(dataBagItemsColl(bag), r.PathValue("item"))
+	raw, ok, err := org.Get(dataBagItemsColl(bag), r.PathValue("item"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find data bag item "+r.PathValue("item"))
 		return
@@ -165,7 +202,10 @@ func (a *API) putDataBagItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	org.Put(dataBagItemsColl(bag), r.PathValue("item"), raw)
+	if err := org.Put(dataBagItemsColl(bag), r.PathValue("item"), raw); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeRaw(w, http.StatusOK, raw)
 }
 
@@ -178,7 +218,11 @@ func (a *API) deleteDataBagItem(w http.ResponseWriter, r *http.Request) {
 	if !a.bagExists(w, org, bag) {
 		return
 	}
-	raw, ok := org.Delete(dataBagItemsColl(bag), r.PathValue("item"))
+	raw, ok, err := org.Delete(dataBagItemsColl(bag), r.PathValue("item"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find data bag item "+r.PathValue("item"))
 		return

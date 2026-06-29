@@ -78,7 +78,11 @@ func (a *API) Handler() http.Handler {
 // nil if it does not exist.
 func (a *API) org(w http.ResponseWriter, r *http.Request) *store.Org {
 	name := r.PathValue("org")
-	org, ok := a.store.Org(name)
+	org, ok, err := a.store.Org(name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return nil
+	}
 	if !ok {
 		writeError(w, http.StatusNotFound, "Cannot find org "+name)
 		return nil

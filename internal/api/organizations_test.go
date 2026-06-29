@@ -86,7 +86,9 @@ func TestOrganizationManagement(t *testing.T) {
 	if resp.StatusCode != 404 {
 		t.Fatalf("get deleted org = %d", resp.StatusCode)
 	}
-	if _, ok := st.Org("acme"); ok {
+	if _, ok, err := st.Org("acme"); err != nil {
+		t.Fatal(err)
+	} else if ok {
 		t.Fatal("org not removed from store")
 	}
 }
@@ -100,11 +102,16 @@ func TestCreateOrganizationHelper(t *testing.T) {
 	if len(priv) == 0 {
 		t.Fatal("no validator key returned")
 	}
-	org, ok := st.Org("beta")
+	org, ok, err := st.Org("beta")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("org not created")
 	}
-	if _, ok := org.Get("clients", "beta-validator"); !ok {
+	if _, ok, err := org.Get("clients", "beta-validator"); err != nil {
+		t.Fatal(err)
+	} else if !ok {
 		t.Fatal("validator client not created")
 	}
 	if _, err := CreateOrganization(st, "beta", ""); err == nil {
@@ -131,11 +138,17 @@ func TestCreateOrganizationWithKeyUsesProvidedKey(t *testing.T) {
 		t.Fatal("returned private key does not match the provided key")
 	}
 
-	org, ok := st.Org("gamma")
+	org, ok, err := st.Org("gamma")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("org not created")
 	}
-	raw, ok := org.Get("clients", "gamma-validator")
+	raw, ok, err := org.Get("clients", "gamma-validator")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok {
 		t.Fatal("validator client not created")
 	}

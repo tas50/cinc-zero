@@ -8,6 +8,16 @@ import (
 	"github.com/tas50/cinc-zero/internal/store"
 )
 
+// getOK reports whether (coll,key) exists, failing the test on a store error.
+func getOK(t *testing.T, org *store.Org, coll, key string) bool {
+	t.Helper()
+	_, ok, err := org.Get(coll, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ok
+}
+
 // writeRepo lays out a small chef-repo under dir.
 func writeRepo(t *testing.T, dir string, files map[string]string) {
 	t.Helper()
@@ -44,34 +54,34 @@ func TestLoad(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if _, ok := org.Get("nodes", "web01"); !ok {
+	if !getOK(t, org, "nodes", "web01") {
 		t.Fatal("node web01 not loaded")
 	}
-	if _, ok := org.Get("roles", "web"); !ok {
+	if !getOK(t, org, "roles", "web") {
 		t.Fatal("role web not loaded")
 	}
-	if _, ok := org.Get("environments", "prod"); !ok {
+	if !getOK(t, org, "environments", "prod") {
 		t.Fatal("environment prod not loaded")
 	}
-	if _, ok := org.Get("clients", "builder"); !ok {
+	if !getOK(t, org, "clients", "builder") {
 		t.Fatal("client builder not loaded")
 	}
 	// Policy locks load as revisions, keyed by revision_id, exactly where the
 	// policy API reads them — not into a dead "policies" collection.
-	if _, ok := org.Get("policy_revisions:base", "1.0.0"); !ok {
+	if !getOK(t, org, "policy_revisions:base", "1.0.0") {
 		t.Fatal("policy revision base/1.0.0 not loaded")
 	}
-	if _, ok := org.Get("policy_groups", "prod"); !ok {
+	if !getOK(t, org, "policy_groups", "prod") {
 		t.Fatal("policy group prod not loaded")
 	}
 	// Data bags register the bag and store items in the bag's item collection.
-	if _, ok := org.Get("data_bags", "users"); !ok {
+	if !getOK(t, org, "data_bags", "users") {
 		t.Fatal("data bag users not registered")
 	}
-	if _, ok := org.Get("databag_items:users", "alice"); !ok {
+	if !getOK(t, org, "databag_items:users", "alice") {
 		t.Fatal("data bag item alice not loaded")
 	}
-	if _, ok := org.Get("databag_items:secrets", "key"); !ok {
+	if !getOK(t, org, "databag_items:secrets", "key") {
 		t.Fatal("data bag item key not loaded")
 	}
 
@@ -99,11 +109,11 @@ func TestLoadPolicyRevisions(t *testing.T) {
 	}
 
 	for _, rev := range []string{"1.0.0", "1.1.0"} {
-		if _, ok := org.Get("policy_revisions:appserver", rev); !ok {
+		if !getOK(t, org, "policy_revisions:appserver", rev) {
 			t.Errorf("appserver revision %s not loaded", rev)
 		}
 	}
-	if _, ok := org.Get("policy_revisions:web", "2.0.0"); !ok {
+	if !getOK(t, org, "policy_revisions:web", "2.0.0") {
 		t.Error("web revision 2.0.0 not loaded")
 	}
 	if sum.Counts["policy_revisions"] != 3 {
@@ -148,7 +158,7 @@ func TestLoadNameFallsBackToFilename(t *testing.T) {
 	if _, err := Load(org, dir); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := org.Get("nodes", "fromfile"); !ok {
+	if !getOK(t, org, "nodes", "fromfile") {
 		t.Fatal("node keyed by filename not loaded")
 	}
 }

@@ -48,7 +48,11 @@ func (a *API) listObjects(segment string) http.HandlerFunc {
 		if org == nil {
 			return
 		}
-		keys := org.Keys(segment) // sorted
+		keys, err := org.Keys(segment) // sorted
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		// Every value is the same prefix followed by the (escaped) name; escape the
 		// constant prefix once rather than per entry.
 		prefix := appendJSONStringContent(nil, objectURL(r, org.Name(), segment, ""))
@@ -109,6 +113,9 @@ func (a *API) createObject(segment string) http.HandlerFunc {
 		if err := org.Create(segment, name, raw); errors.Is(err, store.ErrConflict) {
 			writeError(w, http.StatusConflict, "Object already exists")
 			return
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
 		}
 		writeJSON(w, http.StatusCreated, map[string]string{
 			"uri": objectURL(r, org.Name(), segment, name),
@@ -123,7 +130,11 @@ func (a *API) getObject(segment string) http.HandlerFunc {
 			return
 		}
 		name := r.PathValue("name")
-		raw, ok := org.View(segment, name)
+		raw, ok, err := org.View(segment, name)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		if !ok {
 			writeError(w, http.StatusNotFound, "Cannot find "+segment+" "+name)
 			return
@@ -144,7 +155,10 @@ func (a *API) putObject(segment string) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")
 			return
 		}
-		org.Put(segment, name, raw)
+		if err := org.Put(segment, name, raw); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		writeRaw(w, http.StatusOK, raw)
 	}
 }
@@ -156,7 +170,11 @@ func (a *API) deleteObject(segment string) http.HandlerFunc {
 			return
 		}
 		name := r.PathValue("name")
-		raw, ok := org.Delete(segment, name)
+		raw, ok, err := org.Delete(segment, name)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		if !ok {
 			writeError(w, http.StatusNotFound, "Cannot find "+segment+" "+name)
 			return
@@ -171,7 +189,12 @@ func (a *API) headObject(segment string) http.HandlerFunc {
 		if org == nil {
 			return
 		}
-		if _, ok := org.View(segment, r.PathValue("name")); !ok {
+		_, ok, err := org.View(segment, r.PathValue("name"))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !ok {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
