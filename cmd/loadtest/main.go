@@ -7,7 +7,7 @@
 //   - QPS@1   : single-connection throughput
 //   - QPS@N   : throughput at concurrency N
 //
-// It can talk to a server that requires Mixlib authentication (-user/-keypem):
+// It can talk to a server that requires Mixlib authentication (--user/--keypem):
 // each operation is signed exactly once and the signed headers are replayed, so
 // the throughput numbers reflect the server's signature-verification cost rather
 // than the client's RSA-signing cost.
@@ -16,9 +16,9 @@
 //
 // Example:
 //
-//	go run ./cmd/loadtest -base http://127.0.0.1:8902/organizations/acme -label cinc-noauth
-//	go run ./cmd/loadtest -base http://127.0.0.1:8903/organizations/acme \
-//	    -user pivotal -keypem /tmp/pivotal.pem -label cinc-auth
+//	go run ./cmd/loadtest --base http://127.0.0.1:8902/organizations/acme --label cinc-noauth
+//	go run ./cmd/loadtest --base http://127.0.0.1:8903/organizations/acme \
+//	    --user pivotal --keypem /tmp/pivotal.pem --label cinc-auth
 package main
 
 import (
@@ -61,7 +61,7 @@ type op struct{ name, method, path, body string }
 func main() {
 	flag.Parse()
 	if *base == "" {
-		fmt.Fprintln(os.Stderr, "need -base")
+		fmt.Fprintln(os.Stderr, "need --base")
 		os.Exit(2)
 	}
 	if *user != "" && *keyPEM != "" {
