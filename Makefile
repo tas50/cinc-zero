@@ -15,7 +15,7 @@ LDFLAGS := -X $(LDFLAGS_PKG).version=$(VERSION) \
            -X $(LDFLAGS_PKG).commit=$(COMMIT) \
            -X $(LDFLAGS_PKG).buildDate=$(BUILD_DATE)
 
-.PHONY: all build dist install test conformance vet fmt tidy clean run run-dev dev-db run-dev-sqlite help
+.PHONY: all build dist install test conformance vet fmt tidy clean run run-dev dev-db dev-db-reset run-dev-sqlite help
 
 all: build
 
@@ -76,12 +76,23 @@ run: build
 run-dev: build
 	./$(BINARY) --no-auth --state dev/test-repo --key-out dev-admin.pem $(ARGS)
 
-DEV_DB ?= dev/cinc-dev.db
+DEV_DB   ?= dev/cinc-dev.db
+SEED_GEN ?= dev/seed.gen
 
-## dev-db: bake the dev/test-repo seed into a SQLite database at $(DEV_DB)
+## dev-db: bake the committed base seed plus the generated expansion into $(DEV_DB),
+## additively — re-running preserves the existing pivotal key (so a console's webui
+## key keeps working) and any runtime data. Use dev-db-reset for a clean rebuild.
 dev-db: build
-	rm -f $(DEV_DB) $(DEV_DB)-wal $(DEV_DB)-shm
 	./$(BINARY) --storage sqlite --db $(DEV_DB) --state dev/test-repo --key-out dev-admin.pem --init
+	rm -rf $(SEED_GEN)
+	go run ./cmd/seedgen -base dev/test-repo -out $(SEED_GEN)
+	./$(BINARY) --storage sqlite --db $(DEV_DB) --state $(SEED_GEN) --key-out dev-admin.pem --init
+	@sqlite3 $(DEV_DB) "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null 2>&1 || true
+
+## dev-db-reset: delete the dev DB and rebuild it from scratch (rotates the pivotal key)
+dev-db-reset: build
+	rm -f $(DEV_DB) $(DEV_DB)-wal $(DEV_DB)-shm
+	$(MAKE) dev-db
 
 ## run-dev-sqlite: serve the dev SQLite database (auth on, for cinc-console); builds it first if missing
 run-dev-sqlite: build

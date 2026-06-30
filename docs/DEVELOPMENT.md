@@ -37,25 +37,31 @@ omnitruck.
 
 Two representations of the same realistic dataset live under `dev/`:
 
-- **`dev/test-repo/`** — the canonical, diffable seed: a full server-state
+- **`dev/test-repo/`** — the canonical, diffable base seed: a full server-state
   directory (the `--state` format) with global users, the `acme` organization,
-  ~100 nodes, roles, environments, data bags, cookbooks, Policyfiles/policy
-  groups, authz groups, and org membership. This is the source of truth; edit it
-  as text.
-- **`dev/cinc-dev.db`** — a SQLite database **generated from** `dev/test-repo`
-  via `make dev-db`. It's a build artifact (git-ignored), so it never drifts from
-  the canonical seed. Use it to run a durable server that already has all the dev
-  data in it.
+  ~100 hand-curated nodes, roles, environments, data bags, cookbooks,
+  Policyfiles/policy groups, authz groups, and org membership. Source of truth;
+  edit it as text.
+- **`cmd/seedgen`** — a deterministic generator that produces the *large*
+  synthetic expansion of the fictional **ACME** business: ~1000 extra nodes
+  across 20 functional tiers (web/app/api/worker/db/cache/queue/search/proxy/
+  lb/ci/log/monitor/storage/dns/backup/dc/mail/bastion/vault), named like real
+  hosts (`web-iad-014`, `db-fra-003`), plus the roles and cookbooks those nodes
+  run, `qa`/`dr` environments, and 25 filler users. It writes a git-ignored
+  `dev/seed.gen/` that `make dev-db` bakes on top of the base seed.
+- **`dev/cinc-dev.db`** — a SQLite database **committed** as a ready-to-run
+  fixture (~1100 nodes, 21 roles, 21 cookbooks, 6 environments, 28 users). It is
+  baked from `dev/test-repo` + `cmd/seedgen`; `make run-dev-sqlite` serves it
+  directly with no build step.
 
-`make dev-db` simply bakes the seed into the database and exits, using the
-`--init` flag (which seeds the store and exits without serving — also handy for
-pre-baking a database into a container image):
+`make dev-db` bakes the base seed, runs `seedgen`, and bakes the expansion on
+top — **additively**, so re-running preserves the existing `pivotal` key (a
+console's webui key keeps working) and any runtime data. Use `make dev-db-reset`
+for a clean rebuild from scratch (which rotates the key).
 
 ```sh
-make dev-db
-# equivalently:
-./cinc-zero --storage sqlite --db dev/cinc-dev.db --state dev/test-repo \
-  --key-out dev-admin.pem --init
+make dev-db          # additive rebuild (key-stable)
+make dev-db-reset    # clean rebuild from scratch (rotates the dev key)
 ```
 
 ## Running a dev server
