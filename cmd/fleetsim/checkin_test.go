@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -59,7 +60,7 @@ func TestCheckInStampsAndPuts(t *testing.T) {
 		t.Fatal(err)
 	}
 	n := &node{name: "n1", body: []byte(`{"name":"n1"}`)}
-	if err := c.checkIn(n, 1780000000); err != nil {
+	if err := c.checkIn(context.Background(), n, 1780000000); err != nil {
 		t.Fatal(err)
 	}
 	var got map[string]any

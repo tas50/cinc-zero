@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -32,8 +33,8 @@ func selectStuck(names []string, frac float64, rng *rand.Rand) map[string]bool {
 
 // discover reads the whole fleet from the server: list node names, then fetch
 // each node's full body. Nodes are returned sorted by name.
-func discover(c *client) ([]*node, error) {
-	body, status, err := c.do("GET", "/nodes", nil)
+func discover(ctx context.Context, c *client) ([]*node, error) {
+	body, status, err := c.do(ctx, "GET", "/nodes", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +52,7 @@ func discover(c *client) ([]*node, error) {
 	sort.Strings(names)
 	nodes := make([]*node, 0, len(names))
 	for _, name := range names {
-		nb, status, err := c.do("GET", "/nodes/"+name, nil)
+		nb, status, err := c.do(ctx, "GET", "/nodes/"+name, nil)
 		if err != nil {
 			return nil, err
 		}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -49,7 +50,7 @@ func TestDiscover(t *testing.T) {
 	defer srv.Close()
 
 	c, _ := newClient(srv.URL, "", "", 5*time.Second)
-	nodes, err := discover(c)
+	nodes, err := discover(context.Background(), c)
 	if err != nil {
 		t.Fatal(err)
 	}

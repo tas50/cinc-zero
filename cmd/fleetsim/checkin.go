@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/rsa"
 	"encoding/json"
 	"fmt"
@@ -52,13 +53,14 @@ func newClient(base, user, keyPEMPath string, timeout time.Duration) (*client, e
 }
 
 // do builds, signs, and sends a request to base+path, returning the response
-// body and status code.
-func (c *client) do(method, path string, body []byte) ([]byte, int, error) {
+// body and status code. The request honors ctx, so a cancelled run aborts any
+// in-flight call promptly instead of waiting out the client timeout.
+func (c *client) do(ctx context.Context, method, path string, body []byte) ([]byte, int, error) {
 	var r io.Reader
 	if body != nil {
 		r = bytes.NewReader(body)
 	}
-	req, err := http.NewRequest(method, c.base+path, r)
+	req, err := http.NewRequestWithContext(ctx, method, c.base+path, r)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -87,8 +89,8 @@ func (c *client) do(method, path string, body []byte) ([]byte, int, error) {
 // checkIn performs one simulated chef-client check-in for n: fetch the current
 // node, stamp automatic.ohai_time with now, and PUT it back. On success the
 // node's cached body is updated so the next cycle round-trips the latest state.
-func (c *client) checkIn(n *node, now int64) error {
-	body, status, err := c.do("GET", "/nodes/"+n.name, nil)
+func (c *client) checkIn(ctx context.Context, n *node, now int64) error {
+	body, status, err := c.do(ctx, "GET", "/nodes/"+n.name, nil)
 	if err != nil {
 		return err
 	}
@@ -99,7 +101,7 @@ func (c *client) checkIn(n *node, now int64) error {
 	if err != nil {
 		return err
 	}
-	_, status, err = c.do("PUT", "/nodes/"+n.name, stamped)
+	_, status, err = c.do(ctx, "PUT", "/nodes/"+n.name, stamped)
 	if err != nil {
 		return err
 	}
