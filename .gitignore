@@ -10,3 +10,8 @@ dist/
 *.db
 *.db-wal
 *.db-shm
+# ...except the shipped dev database, which is committed as a ready-to-run fixture.
+!dev/cinc-dev.db
+# The large generated seed expansion (1000 nodes, etc.) is rebuilt by cmd/seedgen
+# during `make dev-db`; only the baked DB is committed, not these files.
+dev/seed.gen/

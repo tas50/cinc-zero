@@ -63,6 +63,53 @@ func TestSQLiteServerRestartIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestSQLiteReinitWithStateKeepsKeyAndData verifies that re-running the seed
+// load over an existing SQLite database — what an additive `make dev-db` does to
+// pick up seed edits — does NOT rotate the bootstrap admin key and does NOT
+// discard runtime data written since the last bake. This is the property that
+// lets the dev DB be re-baked without breaking a console's webui key or losing
+// UI-created objects.
+func TestSQLiteReinitWithStateKeepsKeyAndData(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "rebake.db")
+	opts := Options{Storage: "sqlite", DB: db, StatePath: "../dev/test-repo"}
+
+	srv1, err := New(opts)
+	if err != nil {
+		t.Fatalf("first bake: %v", err)
+	}
+	if err := srv1.Start(); err != nil {
+		t.Fatal(err)
+	}
+	adminKey1 := append([]byte(nil), srv1.AdminKey()...)
+	// A runtime write, standing in for an object created via the console UI.
+	if s := respStatus(t, signed(t, srv1, "POST", srv1.URL()+"/organizations/acme/nodes", `{"name":"ui-made"}`)); s != http.StatusCreated {
+		t.Fatalf("create runtime node: status %d", s)
+	}
+	stopServer(t, srv1)
+
+	// Re-bake: reload the seed into the same database.
+	srv2, err := New(opts)
+	if err != nil {
+		t.Fatalf("re-bake over existing DB: %v", err)
+	}
+	if err := srv2.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer stopServer(t, srv2)
+
+	if !bytes.Equal(srv2.AdminKey(), adminKey1) {
+		t.Fatal("admin key rotated on re-bake; a console's webui key would break")
+	}
+	// The runtime (UI) object survives the re-bake.
+	if s := respStatus(t, signed(t, srv2, "GET", srv2.URL()+"/organizations/acme/nodes/ui-made", "")); s != http.StatusOK {
+		t.Fatalf("runtime node lost on re-bake: status %d", s)
+	}
+	// And the seed is (re)applied — a seed role is present.
+	if s := respStatus(t, signed(t, srv2, "GET", srv2.URL()+"/organizations/acme/roles/base", "")); s != http.StatusOK {
+		t.Fatalf("seed not applied on re-bake: status %d", s)
+	}
+}
+
 // TestMemoryServerIsFreshEachTime confirms the default in-memory backend keeps its
 // ephemeral behaviour: a new server starts empty and generates a fresh admin key.
 func TestMemoryServerIsFreshEachTime(t *testing.T) {
