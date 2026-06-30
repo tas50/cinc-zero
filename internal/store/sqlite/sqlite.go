@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"runtime"
 	"strings"
 
 	"github.com/tas50/cinc-zero/internal/store"
@@ -54,11 +55,16 @@ type querier interface {
 	Exec(query string, args ...any) (sql.Result, error)
 }
 
-// Backend is a SQLite-backed store.Backend. q routes every data query (it is the
-// *sql.DB normally, or a *sql.Tx inside Tx); db is retained for Begin/Close.
+// Backend is a SQLite-backed store.Backend. Writes route through q (the writer
+// *sql.DB, or a *sql.Tx inside Tx); reads route through rq (the reader pool, or
+// the same *sql.Tx inside Tx so a transaction observes its own writes). db is
+// the writer pool, retained for Begin/Close; rdb is the reader pool (equal to db
+// for :memory:, where a second handle would be a distinct database).
 type Backend struct {
-	db *sql.DB
-	q  querier
+	db  *sql.DB
+	rdb *sql.DB
+	q   querier
+	rq  querier
 }
 
 // Open opens (creating if needed) a SQLite database at path and applies migrations.
@@ -71,16 +77,44 @@ func Open(path string) (*Backend, error) {
 	// SQLite (even in WAL) admits exactly one writer at a time. With Go's default
 	// unbounded pool, concurrent writers each grab a connection, collide on the
 	// write lock, and busy-wait via usleep until busy_timeout — burning CPU and
-	// thrashing the scheduler under fleet check-in load. Capping the pool to a
-	// single connection turns that into a cheap in-process queue: writes serialize
+	// thrashing the scheduler under fleet check-in load. Capping the writer pool to
+	// a single connection turns that into a cheap in-process queue: writes serialize
 	// on Go's connection mutex instead of spinning inside SQLite.
 	db.SetMaxOpenConns(1)
-	b := &Backend{db: db, q: db}
+	b := &Backend{db: db, q: db, rdb: db, rq: db}
+
+	// WAL admits many readers concurrently with the single writer. Capping the
+	// writer pool to one connection is right for writes, but forcing reads through
+	// it too discards that concurrency: a dashboard scan then queues behind every
+	// in-flight check-in. Give reads their own pool on the same file (query_only so
+	// it never takes the write lock) so they run against the last committed
+	// snapshot without blocking — or being blocked by — writers. A :memory: path is
+	// per-connection, so a second handle would be a distinct empty database; there
+	// reads must share the writer pool (memory-backed SQLite is test-only anyway).
+	if !isMemory(path) {
+		rdb, err := sql.Open("sqlite", dsnWithPragmas(path)+"&_pragma=query_only=true")
+		if err != nil {
+			db.Close()
+			return nil, err
+		}
+		readers := max(4, runtime.NumCPU())
+		rdb.SetMaxOpenConns(readers)
+		rdb.SetMaxIdleConns(readers)
+		b.rdb = rdb
+		b.rq = rdb
+	}
+
 	if err := b.migrate(); err != nil {
-		db.Close()
+		b.Close()
 		return nil, err
 	}
 	return b, nil
+}
+
+// isMemory reports whether path designates an in-memory database, whose pages
+// live only within a single connection and so cannot be shared by a second pool.
+func isMemory(path string) bool {
+	return strings.Contains(path, ":memory:") || strings.Contains(path, "mode=memory")
 }
 
 // dsnWithPragmas appends connection pragmas to path as modernc _pragma query
@@ -161,7 +195,7 @@ func applyMigrations(db *sql.DB, migs []migration) error {
 
 func (b *Backend) Get(org, coll, key string) ([]byte, bool, error) {
 	var body []byte
-	err := b.q.QueryRow(
+	err := b.rq.QueryRow(
 		`SELECT body FROM objects WHERE org=? AND collection=? AND key=?`,
 		org, coll, key).Scan(&body)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -213,7 +247,7 @@ func (b *Backend) Delete(org, coll, key string) ([]byte, bool, error) {
 }
 
 func (b *Backend) Keys(org, coll string) ([]string, error) {
-	rows, err := b.q.Query(
+	rows, err := b.rq.Query(
 		`SELECT key FROM objects WHERE org=? AND collection=? ORDER BY key`, org, coll)
 	if err != nil {
 		return nil, err
@@ -231,7 +265,7 @@ func (b *Backend) Keys(org, coll string) ([]string, error) {
 }
 
 func (b *Backend) Range(org, coll string, fn func(key string, raw []byte) bool) error {
-	rows, err := b.q.Query(
+	rows, err := b.rq.Query(
 		`SELECT key, body FROM objects WHERE org=? AND collection=? ORDER BY key`, org, coll)
 	if err != nil {
 		return err
@@ -251,7 +285,7 @@ func (b *Backend) Range(org, coll string, fn func(key string, raw []byte) bool) 
 }
 
 func (b *Backend) Collections(org string) ([]string, error) {
-	rows, err := b.q.Query(
+	rows, err := b.rq.Query(
 		`SELECT DISTINCT collection FROM objects WHERE org=? ORDER BY collection`, org)
 	if err != nil {
 		return nil, err
@@ -278,7 +312,7 @@ func (b *Backend) PutBlob(org, checksum string, data []byte) error {
 
 func (b *Backend) Blob(org, checksum string) ([]byte, bool, error) {
 	var content []byte
-	err := b.q.QueryRow(
+	err := b.rq.QueryRow(
 		`SELECT content FROM blobs WHERE org=? AND checksum=?`, org, checksum).Scan(&content)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
@@ -291,7 +325,7 @@ func (b *Backend) Blob(org, checksum string) ([]byte, bool, error) {
 
 func (b *Backend) HasBlob(org, checksum string) (bool, error) {
 	var one int
-	err := b.q.QueryRow(
+	err := b.rq.QueryRow(
 		`SELECT 1 FROM blobs WHERE org=? AND checksum=?`, org, checksum).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
@@ -341,7 +375,7 @@ func (b *Backend) DeleteOrg(name string) (bool, error) {
 }
 
 func (b *Backend) ListOrgs() ([]string, error) {
-	rows, err := b.q.Query(`SELECT name FROM orgs ORDER BY name`)
+	rows, err := b.rq.Query(`SELECT name FROM orgs ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -359,7 +393,7 @@ func (b *Backend) ListOrgs() ([]string, error) {
 
 func (b *Backend) HasOrg(name string) (bool, error) {
 	var one int
-	err := b.q.QueryRow(`SELECT 1 FROM orgs WHERE name=?`, name).Scan(&one)
+	err := b.rq.QueryRow(`SELECT 1 FROM orgs WHERE name=?`, name).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -375,11 +409,22 @@ func (b *Backend) Tx(fn func(tx store.Backend) error) error {
 	if err != nil {
 		return err
 	}
-	if err := fn(&Backend{db: b.db, q: sqlTx}); err != nil {
+	// Inside the transaction both reads and writes use the tx connection so it
+	// observes its own uncommitted writes (the reader pool would only see the last
+	// committed snapshot).
+	if err := fn(&Backend{db: b.db, rdb: b.rdb, q: sqlTx, rq: sqlTx}); err != nil {
 		_ = sqlTx.Rollback()
 		return err
 	}
 	return sqlTx.Commit()
 }
 
-func (b *Backend) Close() error { return b.db.Close() }
+func (b *Backend) Close() error {
+	err := b.db.Close()
+	if b.rdb != nil && b.rdb != b.db {
+		if rerr := b.rdb.Close(); err == nil {
+			err = rerr
+		}
+	}
+	return err
+}
