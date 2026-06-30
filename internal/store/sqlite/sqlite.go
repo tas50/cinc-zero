@@ -68,6 +68,13 @@ func Open(path string) (*Backend, error) {
 	if err != nil {
 		return nil, err
 	}
+	// SQLite (even in WAL) admits exactly one writer at a time. With Go's default
+	// unbounded pool, concurrent writers each grab a connection, collide on the
+	// write lock, and busy-wait via usleep until busy_timeout — burning CPU and
+	// thrashing the scheduler under fleet check-in load. Capping the pool to a
+	// single connection turns that into a cheap in-process queue: writes serialize
+	// on Go's connection mutex instead of spinning inside SQLite.
+	db.SetMaxOpenConns(1)
 	b := &Backend{db: db, q: db}
 	if err := b.migrate(); err != nil {
 		db.Close()
