@@ -6,59 +6,42 @@ the real Chef Infra Server API and authenticates unmodified `chef-client` /
 `knife` / `cinc` clients using genuine
 [Mixlib::Authentication](https://github.com/chef/mixlib-authentication) signed
 requests. Run it fully **in memory** for instant, disposable test servers, or
-back it with **SQLite** for durable state that survives restarts — the same
-server scaling from a throwaway CI fixture to lightweight production
+back it with **SQLite** for durable state that survives restarts. The same
+server scales from a throwaway CI fixture to lightweight production
 infrastructure. It ships as a single static binary, with no Ruby runtime and no
-external database to operate — packaged as a minimal container image, it drops
+external database to operate. Packaged as a minimal container image, it drops
 cleanly into modern orchestration such as Kubernetes (a persistent volume for the
 SQLite database is all the state it needs).
 
 ## Why cinc-zero
 
-**Complete Chef Infra Server API, including Policyfiles.** cinc-zero implements
-the full surface a real client touches: nodes, roles, environments, clients,
-users, data bags, cookbooks (sandboxes, file store, artifacts, `/universe`),
-search, authz groups/containers, ACLs, key management, user↔org association and
-invites, and multi-org management. Mixlib authentication (v1.0 / 1.1 / 1.3) is
-verified byte-for-byte against the real gem, so unmodified `chef-client`,
-`knife`, and `cinc` clients just work. **WebUI-key impersonation
-(`X-Ops-Request-Source: web`)** is supported too, so a management console such as
-cinc-console can sign on a user's behalf and have the server enforce that user's
-ACLs. Crucially, **Policyfiles and policy groups are first-class**, with deploy
-and pull flows that chef-zero leaves on the table.
+**Complete API, including Policyfiles.** cinc-zero implements the full surface a
+real client touches: nodes, roles, environments, clients, users, data bags,
+cookbooks, search, authz groups/containers, ACLs, key management, org
+association, and multi-org management. Mixlib authentication (v1.0 / 1.1 / 1.3)
+is verified byte-for-byte against the real gem, so unmodified `chef-client`,
+`knife`, and `cinc` clients just work. **Policyfiles and policy groups are
+first-class**, and WebUI-key impersonation lets a console like cinc-console sign
+on a user's behalf.
 
-**Performance.** Built in Go, cinc-zero handles requests concurrently across all
-available cores. Its goroutine-per-request model scales naturally under the
-parallel load that real test fleets generate, with none of the global-lock
-contention that single-threaded Ruby servers hit. State lives entirely in
-memory, so there's no database or disk round-trip in the request path. On top of
-that, the hot code paths have been deliberately optimized (cached flattened
-search documents and parsed actor keys, batched and scoped scans, and copy-free
-reads) to keep search, auth, and object access fast even with large numbers of
-nodes and concurrent clients.
+**Fast under fleet load.** Go handles requests concurrently across all cores,
+with none of the global-lock contention that single-threaded Ruby servers hit.
+In-memory state keeps disk out of the request path, and the hot paths for
+search, auth, and object access are optimized to stay fast with large node
+counts and many concurrent clients.
 
-**Easy installation: a single binary, no Ruby.** cinc-zero ships as one static
-Go binary (or a Docker image) with zero Ruby or gem dependencies. Drop it in,
-run it, and point your clients at it; embed it directly in Go tests as a
-library. No bundler, no rbenv, no native extensions.
+**One binary, no Ruby.** A single static Go binary (or Docker image) with no
+Ruby, no gems, no native extensions. Drop it in and point your clients at it, or
+embed it directly in Go tests as a library.
 
-**Security: a tiny footprint to attack and to patch.** A production Chef Infra
-Server is a large, multi-service stack — Erlang (oc_erchef), Ruby, PostgreSQL, a
-search service, a message queue, and a reverse proxy — assembled from thousands
-of dependencies that all have to be tracked, audited, and kept patched. cinc-zero
-is the opposite: orders of magnitude less code, whose **only third-party
-dependencies are the pure-Go SQLite driver and its support libraries** —
-everything else (the Chef API, Mixlib authentication, search, and storage) is
-written against the Go standard library, and those SQLite deps only run when you
-choose the durable backend. There is no database server, message broker, or web server to run and
-harden; no Ruby or Erlang runtime in the image; and the distroless/scratch
-container has no shell or OS package manager to exploit. The result is a
-dramatically smaller attack surface and far less dependency-patching toil than a
-full Chef Infra Server — while still authenticating clients with the same genuine
-Mixlib signed-request protocol, so the reduced footprint is not a reduced-security
-shortcut.
-
-See [`docs/specs`](docs/specs) for the full design.
+**Tiny attack and patch surface.** A production Chef Infra Server is a large
+multi-service stack (Erlang, Ruby, PostgreSQL, a search service, a message
+queue, a reverse proxy) built from thousands of dependencies to track and patch.
+cinc-zero's **only third-party dependencies are the pure-Go SQLite driver and
+its support libraries**, and those only run when you choose the durable backend;
+everything else is the Go standard library. No extra services to harden, no
+runtime in the image, and the distroless/scratch container has no shell to
+exploit, all while still authenticating with the genuine Mixlib protocol.
 
 ## Use as a Go library
 
@@ -82,7 +65,7 @@ stored but not enforced, so every authenticated actor is permitted and test
 pipelines stay friction-free. To exercise authorization-dependent behavior
 (requests a real server answers with `403 Forbidden`), set
 `Options{EnforceACL: true}`. (The standalone `cinc-zero` binary takes the
-opposite, production-leaning default — it **enforces** unless told otherwise; see
+opposite, production-leaning default: it **enforces** unless told otherwise; see
 "Use as a binary".) Enforcement matches a real Chef Infra Server: the creator of
 an object is granted full control of it, a registered client joins the org's
 `clients` group and can create and manage its own node, and the standard
@@ -105,7 +88,7 @@ go build -o cinc-zero ./cmd/cinc-zero
 ./cinc-zero --addr 127.0.0.1:8889 --orgs test --key-out admin.pem
 ```
 
-The binary **enforces ACLs by default** — a freshly bootstrapped org behaves like
+The binary **enforces ACLs by default**. A freshly bootstrapped org behaves like
 a real Chef Infra Server, and the standard chef-client lifecycle (a validator
 registers a client, which then creates and updates its own node) works out of the
 box. Pass `--enforce-acls=false` for a permissive server where every authenticated
@@ -125,7 +108,7 @@ synthesized manifest.
 
 ## Persistence and storage
 
-By default cinc-zero keeps all state in memory — the ephemeral "zero" experience
+By default cinc-zero keeps all state in memory: the ephemeral "zero" experience
 that needs no disk and resets on exit. To persist state across restarts, point it
 at a SQLite database:
 
@@ -144,7 +127,7 @@ so the static binary and `scratch`/`distroless` images keep working with
 `--sqlite-group-commit` to batch concurrently-pending writes into shared
 transactions (group commit), amortizing SQLite's per-commit cost. It roughly
 halves write cost under concurrent load at the price of slightly higher latency
-for a lone serialized writer, so it is opt-in and off by default — leave it off
+for a lone serialized writer, so it is opt-in and off by default; leave it off
 for single-client use such as CI fixtures.
 
 The storage layer is pluggable behind a small `store.Backend` interface
@@ -157,7 +140,7 @@ and the bootstrap admin/validator keys are persisted so the key written by
 `--key-out` keeps authenticating after a restart. (The in-memory backend always
 starts fresh.)
 
-**Backups** are delegated to the backend — cinc-zero ships no backup subsystem.
+**Backups** are delegated to the backend; cinc-zero ships no backup subsystem.
 For SQLite, take a consistent online copy while the server runs:
 
 ```sh
