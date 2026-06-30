@@ -15,3 +15,10 @@ dist/
 # The large generated seed expansion (1000 nodes, etc.) is rebuilt by cmd/seedgen
 # during `make dev-db`; only the baked DB is committed, not these files.
 dev/seed.gen/
+
+# don't ship the binaries
+cmd/fleetsim/fleetsim
+cmd/loadtest/loadtest
+
+# don't ship the worktrees dir
+.claude/workstrees/
