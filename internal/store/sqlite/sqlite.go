@@ -60,11 +60,24 @@ type querier interface {
 // the same *sql.Tx inside Tx so a transaction observes its own writes). db is
 // the writer pool, retained for Begin/Close; rdb is the reader pool (equal to db
 // for :memory:, where a second handle would be a distinct database).
+//
+// The objects table carries the per-node check-in traffic (a GET then a PUT on
+// every client run), and the pure-Go driver recompiles a SQL string on every
+// Exec/QueryRow. The stObj* fields hold *sql.Stmt prepared once against the
+// pools, so that hot path reuses an already-compiled statement instead of
+// reparsing per call. They are nil inside a Tx (the Tx struct literal leaves
+// them unset): a pool-bound statement would run outside the transaction, so the
+// data methods fall back to raw SQL on the tx connection when the stmt is nil.
 type Backend struct {
 	db  *sql.DB
 	rdb *sql.DB
 	q   querier
 	rq  querier
+
+	stObjGet    *sql.Stmt // reader pool: SELECT one object body
+	stObjPut    *sql.Stmt // writer pool: upsert one object
+	stObjCreate *sql.Stmt // writer pool: insert-if-absent one object
+	stObjDelete *sql.Stmt // writer pool: delete one object
 }
 
 // Open opens (creating if needed) a SQLite database at path and applies migrations.
@@ -108,7 +121,61 @@ func Open(path string) (*Backend, error) {
 		b.Close()
 		return nil, err
 	}
+	if err := b.prepare(); err != nil {
+		b.Close()
+		return nil, err
+	}
 	return b, nil
+}
+
+// SQL for the objects-table hot path, shared by the prepared statements and the
+// raw fallback used inside a transaction.
+const (
+	sqlObjGet    = `SELECT body FROM objects WHERE org=? AND collection=? AND key=?`
+	sqlObjPut    = `INSERT INTO objects(org,collection,key,body) VALUES(?,?,?,?) ON CONFLICT(org,collection,key) DO UPDATE SET body=excluded.body`
+	sqlObjCreate = `INSERT INTO objects(org,collection,key,body) VALUES(?,?,?,?) ON CONFLICT(org,collection,key) DO NOTHING`
+	sqlObjDelete = `DELETE FROM objects WHERE org=? AND collection=? AND key=?`
+)
+
+// prepare compiles the objects-table hot-path statements once, after migration.
+// Reads bind to the reader pool, writes to the writer pool; database/sql lazily
+// (re)prepares each statement per pooled connection and caches it, so every
+// connection reuses a compiled plan. Must run after migrate (the objects table
+// must exist) and only on a top-level Backend (never inside a Tx).
+func (b *Backend) prepare() error {
+	var err error
+	if b.stObjGet, err = b.rdb.Prepare(sqlObjGet); err != nil {
+		return err
+	}
+	if b.stObjPut, err = b.db.Prepare(sqlObjPut); err != nil {
+		return err
+	}
+	if b.stObjCreate, err = b.db.Prepare(sqlObjCreate); err != nil {
+		return err
+	}
+	if b.stObjDelete, err = b.db.Prepare(sqlObjDelete); err != nil {
+		return err
+	}
+	return nil
+}
+
+// queryRow runs a single-row read through the prepared statement st when set,
+// else as raw SQL on rq (the path taken inside a Tx, where st is nil so the read
+// uses the transaction's own connection).
+func (b *Backend) queryRow(st *sql.Stmt, query string, args ...any) *sql.Row {
+	if st != nil {
+		return st.QueryRow(args...)
+	}
+	return b.rq.QueryRow(query, args...)
+}
+
+// exec runs a write through the prepared statement st when set, else as raw SQL
+// on q (the path taken inside a Tx).
+func (b *Backend) exec(st *sql.Stmt, query string, args ...any) (sql.Result, error) {
+	if st != nil {
+		return st.Exec(args...)
+	}
+	return b.q.Exec(query, args...)
 }
 
 // isMemory reports whether path designates an in-memory database, whose pages
@@ -195,9 +262,7 @@ func applyMigrations(db *sql.DB, migs []migration) error {
 
 func (b *Backend) Get(org, coll, key string) ([]byte, bool, error) {
 	var body []byte
-	err := b.rq.QueryRow(
-		`SELECT body FROM objects WHERE org=? AND collection=? AND key=?`,
-		org, coll, key).Scan(&body)
+	err := b.queryRow(b.stObjGet, sqlObjGet, org, coll, key).Scan(&body)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
 	}
@@ -208,18 +273,12 @@ func (b *Backend) Get(org, coll, key string) ([]byte, bool, error) {
 }
 
 func (b *Backend) Put(org, coll, key string, val []byte) error {
-	_, err := b.q.Exec(
-		`INSERT INTO objects(org,collection,key,body) VALUES(?,?,?,?)
-		 ON CONFLICT(org,collection,key) DO UPDATE SET body=excluded.body`,
-		org, coll, key, val)
+	_, err := b.exec(b.stObjPut, sqlObjPut, org, coll, key, val)
 	return err
 }
 
 func (b *Backend) Create(org, coll, key string, val []byte) error {
-	res, err := b.q.Exec(
-		`INSERT INTO objects(org,collection,key,body) VALUES(?,?,?,?)
-		 ON CONFLICT(org,collection,key) DO NOTHING`,
-		org, coll, key, val)
+	res, err := b.exec(b.stObjCreate, sqlObjCreate, org, coll, key, val)
 	if err != nil {
 		return err
 	}
@@ -238,9 +297,7 @@ func (b *Backend) Delete(org, coll, key string) ([]byte, bool, error) {
 	if err != nil || !ok {
 		return nil, false, err
 	}
-	if _, err := b.q.Exec(
-		`DELETE FROM objects WHERE org=? AND collection=? AND key=?`,
-		org, coll, key); err != nil {
+	if _, err := b.exec(b.stObjDelete, sqlObjDelete, org, coll, key); err != nil {
 		return nil, false, err
 	}
 	return old, true, nil
@@ -420,6 +477,14 @@ func (b *Backend) Tx(fn func(tx store.Backend) error) error {
 }
 
 func (b *Backend) Close() error {
+	// db.Close releases statements prepared against the pool, but close them
+	// explicitly first for orderly teardown (and to release reader-pool
+	// statements before that pool closes below). Each is nil-safe to close.
+	for _, st := range []*sql.Stmt{b.stObjGet, b.stObjPut, b.stObjCreate, b.stObjDelete} {
+		if st != nil {
+			st.Close()
+		}
+	}
 	err := b.db.Close()
 	if b.rdb != nil && b.rdb != b.db {
 		if rerr := b.rdb.Close(); err == nil {
