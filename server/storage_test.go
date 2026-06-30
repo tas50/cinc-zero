@@ -40,6 +40,40 @@ func TestSQLiteBackedServerRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSQLiteGroupCommitServerRoundTrip exercises the same full path with the
+// coalescing writer enabled, proving the SQLiteGroupCommit option wires through
+// and serves correctly (group commit must be transparent to clients).
+func TestSQLiteGroupCommitServerRoundTrip(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "gc.db")
+	srv := startServer(t, Options{
+		Orgs:              []string{"acme"},
+		DisableAuth:       true,
+		Storage:           "sqlite",
+		DB:                db,
+		SQLiteGroupCommit: true,
+	})
+
+	base := srv.URL() + "/organizations/acme/nodes"
+	resp, err := http.Post(base, "application/json", strings.NewReader(`{"name":"web01","chef_type":"node"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create node: status %d", resp.StatusCode)
+	}
+
+	resp, err = http.Get(base + "/web01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"web01"`) {
+		t.Fatalf("get node from group-commit sqlite server: status %d body %s", resp.StatusCode, body)
+	}
+}
+
 // TestSQLiteStorageRequiresDB rejects --storage sqlite with no database path
 // rather than silently writing somewhere unexpected.
 func TestSQLiteStorageRequiresDB(t *testing.T) {

@@ -140,6 +140,13 @@ the pure-Go [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite) driver
 so the static binary and `scratch`/`distroless` images keep working with
 `CGO_ENABLED=0`.
 
+**High write throughput.** For fleets where many clients check in at once, pass
+`--sqlite-group-commit` to batch concurrently-pending writes into shared
+transactions (group commit), amortizing SQLite's per-commit cost. It roughly
+halves write cost under concurrent load at the price of slightly higher latency
+for a lone serialized writer, so it is opt-in and off by default — leave it off
+for single-client use such as CI fixtures.
+
 The storage layer is pluggable behind a small `store.Backend` interface
 (`(org, collection, key) → bytes` plus a blob store), so PostgreSQL/RDS can be
 added later as a driver swap rather than a rewrite.
