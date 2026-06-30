@@ -57,17 +57,29 @@ func BenchmarkPut(b *testing.B) {
 	}
 }
 
-// BenchmarkCheckin models the steady-state fleet workload: a GET of a node
-// followed by a PUT of the same node, run concurrently across the fleet.
-func BenchmarkCheckin(b *testing.B) {
-	const nodes = 1107
-	be := benchBackend(b)
+func openBench(b *testing.B, opts ...sqlite.Option) *sqlite.Backend {
+	be, err := sqlite.Open(filepath.Join(b.TempDir(), "bench.db"), opts...)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() { be.Close() })
+	return be
+}
+
+func seedNodes(b *testing.B, be *sqlite.Backend, nodes int) {
 	for i := 0; i < nodes; i++ {
 		n := fmt.Sprintf("node%d", i)
 		if err := be.Put("acme", "nodes", n, nodeBody(n)); err != nil {
 			b.Fatal(err)
 		}
 	}
+}
+
+// benchCheckin models the steady-state fleet workload: a GET of a node followed
+// by a PUT of the same node, run concurrently across the fleet.
+func benchCheckin(b *testing.B, be *sqlite.Backend) {
+	const nodes = 1107
+	seedNodes(b, be, nodes)
 	var seq atomic.Int64
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
@@ -81,6 +93,32 @@ func BenchmarkCheckin(b *testing.B) {
 			}
 		}
 	})
+}
+
+// BenchmarkCheckin / BenchmarkCheckinGroupCommit: concurrent fleet load. Group
+// commit batches the concurrently-pending PUTs into shared transactions,
+// amortizing the per-commit WAL syscalls — the win this workload targets.
+func BenchmarkCheckin(b *testing.B) { benchCheckin(b, openBench(b)) }
+func BenchmarkCheckinGroupCommit(b *testing.B) {
+	benchCheckin(b, openBench(b, sqlite.WithGroupCommit()))
+}
+
+// benchSerialPut is the single-client write path (no concurrency, so no batch
+// ever forms). Group commit's extra goroutine handoff makes this slightly slower
+// — the documented latency cost that keeps it opt-in.
+func benchSerialPut(b *testing.B, be *sqlite.Backend) {
+	body := nodeBody("node0")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := be.Put("acme", "nodes", "node0", body); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkSerialPut(b *testing.B) { benchSerialPut(b, openBench(b)) }
+func BenchmarkSerialPutGroupCommit(b *testing.B) {
+	benchSerialPut(b, openBench(b, sqlite.WithGroupCommit()))
 }
 
 // BenchmarkHasOrg measures the org-existence probe that the API layer runs on

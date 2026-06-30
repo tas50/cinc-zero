@@ -79,6 +79,11 @@ type Options struct {
 	Storage string
 	// DB is the SQLite database file path; required when Storage is "sqlite".
 	DB string
+	// SQLiteGroupCommit enables the SQLite coalescing writer (group commit): under
+	// concurrent fleet write load it batches pending writes into shared
+	// transactions for higher throughput, at a small single-client latency cost.
+	// Ignored unless Storage is "sqlite".
+	SQLiteGroupCommit bool
 	// Backend, when non-nil, is used directly and overrides Storage/DB. It lets
 	// embedding tests inject a specific store.Backend (e.g. a shared in-memory
 	// SQLite DB).
@@ -123,7 +128,11 @@ func buildStore(opts Options) (*store.Store, error) {
 		if opts.DB == "" {
 			return nil, errors.New(`storage "sqlite" requires a database path (Options.DB / --db)`)
 		}
-		b, err := sqlite.Open(opts.DB)
+		var sqlOpts []sqlite.Option
+		if opts.SQLiteGroupCommit {
+			sqlOpts = append(sqlOpts, sqlite.WithGroupCommit())
+		}
+		b, err := sqlite.Open(opts.DB, sqlOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("open sqlite %q: %w", opts.DB, err)
 		}

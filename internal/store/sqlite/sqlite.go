@@ -84,11 +84,41 @@ type Backend struct {
 	stBlobHas    *sql.Stmt // reader pool: blob-existence probe (cookbook upload)
 	stBlobPut    *sql.Stmt // writer pool: upsert one blob
 	stBlobDelete *sql.Stmt // writer pool: delete one blob
+
+	// cw, when non-nil, batches writes through a single coalescing committer
+	// (WithGroupCommit). It is set only on the top-level Backend; the Tx view and
+	// the coalescer's own per-batch view leave it nil, so writes made through
+	// those run directly on their transaction connection.
+	cw *coalescer
+}
+
+// Option configures an optional Backend behavior at Open time.
+type Option func(*config)
+
+// config holds the resolved Open options.
+type config struct {
+	groupCommit bool
+}
+
+// WithGroupCommit enables the coalescing writer: instead of committing every
+// write in its own transaction, concurrently-pending writes are batched into a
+// single shared transaction and committed once. Under fleet write load this
+// amortizes the per-commit WAL syscalls and roughly doubles write throughput; it
+// adds a small latency cost to a write that finds no batch to join (a single
+// serialized client), so it is opt-in and off by default. The commit contract is
+// preserved: a write call does not return until its batch has committed, so a
+// following read observes it.
+func WithGroupCommit() Option {
+	return func(c *config) { c.groupCommit = true }
 }
 
 // Open opens (creating if needed) a SQLite database at path and applies migrations.
 // path is a file path; ":memory:" yields an ephemeral database (mainly for tests).
-func Open(path string) (*Backend, error) {
+func Open(path string, opts ...Option) (*Backend, error) {
+	var cfg config
+	for _, o := range opts {
+		o(&cfg)
+	}
 	db, err := sql.Open("sqlite", dsnWithPragmas(path))
 	if err != nil {
 		return nil, err
@@ -131,7 +161,142 @@ func Open(path string) (*Backend, error) {
 		b.Close()
 		return nil, err
 	}
+	if cfg.groupCommit {
+		b.cw = newCoalescer(b)
+	}
 	return b, nil
+}
+
+// A writeJob is one queued write awaiting the coalescer. apply performs the
+// write against a Backend bound to the shared batch transaction (so it reuses
+// the ordinary tx-fallback code path); done receives the write's result once the
+// batch the job rode commits.
+type writeJob struct {
+	apply func(tb *Backend) error
+	done  chan error
+}
+
+// coalescer serializes all writes through one goroutine that batches whatever is
+// queued into a single transaction and commits once, amortizing the per-commit
+// WAL syscalls across the batch. A write does not return until its batch has
+// committed, preserving the read-after-write contract.
+type coalescer struct {
+	b    *Backend       // owns db/rdb; used to build per-batch tx views
+	ch   chan *writeJob // submitted writes awaiting a batch
+	done chan struct{}  // closed when the loop has drained and exited
+}
+
+func newCoalescer(b *Backend) *coalescer {
+	c := &coalescer{b: b, ch: make(chan *writeJob, 1024), done: make(chan struct{})}
+	go c.loop()
+	return c
+}
+
+// submit enqueues apply and blocks until its batch commits, returning the write's
+// result (including the commit error, if the batch failed to commit).
+func (c *coalescer) submit(apply func(tb *Backend) error) error {
+	j := &writeJob{apply: apply, done: make(chan error, 1)}
+	c.ch <- j
+	return <-j.done
+}
+
+// loop is the single writer goroutine. It blocks for the next job, then greedily
+// (and non-blockingly) drains everything already queued into one batch — so the
+// batch is size 1 under no load and grows naturally under load, never waiting to
+// accumulate and thus never adding latency to grow a batch.
+func (c *coalescer) loop() {
+	defer close(c.done)
+	var batch []*writeJob
+	for first := range c.ch {
+		batch = append(batch[:0], first)
+		for drained := false; !drained; {
+			select {
+			case j := <-c.ch:
+				batch = append(batch, j)
+			default:
+				drained = true
+			}
+		}
+		c.runBatch(batch)
+	}
+}
+
+// txView builds a Backend bound to tx: cw and the prepared statements are nil, so
+// every write method run against it takes its ordinary in-transaction path (raw
+// SQL on tx), exactly like Backend.Tx.
+func (c *coalescer) txView(tx *sql.Tx) *Backend {
+	return &Backend{db: c.b.db, rdb: c.b.rdb, q: tx, rq: tx}
+}
+
+// runBatch applies every job in one transaction and commits once. ErrConflict is
+// a normal Create result (the row's statement succeeded as a no-op), so it does
+// not abort the batch. Any other apply error, or a commit failure, drops the
+// whole batch to isolated single-job retries so one bad write cannot fail its
+// innocent neighbors and each job still gets its true result.
+func (c *coalescer) runBatch(batch []*writeJob) {
+	tx, err := c.b.db.Begin()
+	if err != nil {
+		c.fail(batch, err)
+		return
+	}
+	tb := c.txView(tx)
+	results := make([]error, len(batch))
+	for i, j := range batch {
+		results[i] = j.apply(tb)
+		if results[i] != nil && !errors.Is(results[i], store.ErrConflict) {
+			tx.Rollback()
+			c.runIsolated(batch)
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		c.runIsolated(batch)
+		return
+	}
+	for i, j := range batch {
+		j.done <- results[i] // nil or ErrConflict, now committed
+	}
+}
+
+// runIsolated re-runs each job in its own transaction, used when a batch could
+// not be committed as a unit. Re-running an apply is safe: the failed batch was
+// rolled back, so each job starts from the last committed state, and apply
+// overwrites any result it captures.
+func (c *coalescer) runIsolated(batch []*writeJob) {
+	for _, j := range batch {
+		tx, err := c.b.db.Begin()
+		if err != nil {
+			j.done <- err
+			continue
+		}
+		err = j.apply(c.txView(tx))
+		if err != nil && !errors.Is(err, store.ErrConflict) {
+			tx.Rollback()
+			j.done <- err
+			continue
+		}
+		if cerr := tx.Commit(); cerr != nil {
+			j.done <- cerr
+		} else {
+			j.done <- err
+		}
+	}
+}
+
+// fail reports err to every job in batch (used when a batch transaction cannot
+// even begin).
+func (c *coalescer) fail(batch []*writeJob, err error) {
+	for _, j := range batch {
+		j.done <- err
+	}
+}
+
+// close stops the writer goroutine and waits for it to drain. After close, no
+// further writes may be submitted (the same don't-use-after-Close contract the
+// Backend already carries).
+func (c *coalescer) close() {
+	close(c.ch)
+	<-c.done
 }
 
 // SQL for the objects-table hot path, shared by the prepared statements and the
@@ -203,6 +368,21 @@ func (b *Backend) exec(st *sql.Stmt, query string, args ...any) (sql.Result, err
 		return st.Exec(args...)
 	}
 	return b.q.Exec(query, args...)
+}
+
+// coalesce runs the write fn either through the group-commit coalescer (when
+// enabled on this Backend) or directly. fn is written once against a *Backend:
+// run directly it sees the prepared statements and writes in autocommit; run by
+// the coalescer it receives a batch-transaction view (cw and stmts nil), so the
+// same body takes its in-transaction path (raw SQL on the shared tx). The fn may
+// run more than once if a batch fails and falls back to isolated retries, so it
+// must be safe to repeat — every write method here is (it only issues SQL and
+// overwrites any captured result).
+func (b *Backend) coalesce(fn func(tb *Backend) error) error {
+	if b.cw != nil {
+		return b.cw.submit(fn)
+	}
+	return fn(b)
 }
 
 // isMemory reports whether path designates an in-memory database, whose pages
@@ -300,34 +480,45 @@ func (b *Backend) Get(org, coll, key string) ([]byte, bool, error) {
 }
 
 func (b *Backend) Put(org, coll, key string, val []byte) error {
-	_, err := b.exec(b.stObjPut, sqlObjPut, org, coll, key, val)
-	return err
+	return b.coalesce(func(tb *Backend) error {
+		_, err := tb.exec(tb.stObjPut, sqlObjPut, org, coll, key, val)
+		return err
+	})
 }
 
 func (b *Backend) Create(org, coll, key string, val []byte) error {
-	res, err := b.exec(b.stObjCreate, sqlObjCreate, org, coll, key, val)
-	if err != nil {
-		return err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return store.ErrConflict
-	}
-	return nil
+	return b.coalesce(func(tb *Backend) error {
+		res, err := tb.exec(tb.stObjCreate, sqlObjCreate, org, coll, key, val)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return store.ErrConflict
+		}
+		return nil
+	})
 }
 
 func (b *Backend) Delete(org, coll, key string) ([]byte, bool, error) {
-	old, ok, err := b.Get(org, coll, key)
-	if err != nil || !ok {
-		return nil, false, err
-	}
-	if _, err := b.exec(b.stObjDelete, sqlObjDelete, org, coll, key); err != nil {
-		return nil, false, err
-	}
-	return old, true, nil
+	var old []byte
+	var existed bool
+	err := b.coalesce(func(tb *Backend) error {
+		o, ok, err := tb.Get(org, coll, key)
+		if err != nil || !ok {
+			old, existed = nil, false
+			return err
+		}
+		if _, err := tb.exec(tb.stObjDelete, sqlObjDelete, org, coll, key); err != nil {
+			return err
+		}
+		old, existed = o, true
+		return nil
+	})
+	return old, existed, err
 }
 
 func (b *Backend) Keys(org, coll string) ([]string, error) {
@@ -387,8 +578,10 @@ func (b *Backend) Collections(org string) ([]string, error) {
 }
 
 func (b *Backend) PutBlob(org, checksum string, data []byte) error {
-	_, err := b.exec(b.stBlobPut, sqlBlobPut, org, checksum, data)
-	return err
+	return b.coalesce(func(tb *Backend) error {
+		_, err := tb.exec(tb.stBlobPut, sqlBlobPut, org, checksum, data)
+		return err
+	})
 }
 
 func (b *Backend) Blob(org, checksum string) ([]byte, bool, error) {
@@ -413,44 +606,54 @@ func (b *Backend) HasBlob(org, checksum string) (bool, error) {
 }
 
 func (b *Backend) DeleteBlob(org, checksum string) error {
-	_, err := b.exec(b.stBlobDelete, sqlBlobDelete, org, checksum)
-	return err
+	return b.coalesce(func(tb *Backend) error {
+		_, err := tb.exec(tb.stBlobDelete, sqlBlobDelete, org, checksum)
+		return err
+	})
 }
 
 func (b *Backend) CreateOrg(name string) error {
-	res, err := b.q.Exec(`INSERT INTO orgs(name) VALUES(?) ON CONFLICT(name) DO NOTHING`, name)
-	if err != nil {
-		return err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return store.ErrConflict
-	}
-	return nil
+	return b.coalesce(func(tb *Backend) error {
+		res, err := tb.q.Exec(`INSERT INTO orgs(name) VALUES(?) ON CONFLICT(name) DO NOTHING`, name)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return store.ErrConflict
+		}
+		return nil
+	})
 }
 
 func (b *Backend) DeleteOrg(name string) (bool, error) {
-	res, err := b.q.Exec(`DELETE FROM orgs WHERE name=?`, name)
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	if n == 0 {
-		return false, nil
-	}
-	if _, err := b.q.Exec(`DELETE FROM objects WHERE org=?`, name); err != nil {
-		return false, err
-	}
-	if _, err := b.q.Exec(`DELETE FROM blobs WHERE org=?`, name); err != nil {
-		return false, err
-	}
-	return true, nil
+	var existed bool
+	err := b.coalesce(func(tb *Backend) error {
+		res, err := tb.q.Exec(`DELETE FROM orgs WHERE name=?`, name)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			existed = false
+			return nil
+		}
+		if _, err := tb.q.Exec(`DELETE FROM objects WHERE org=?`, name); err != nil {
+			return err
+		}
+		if _, err := tb.q.Exec(`DELETE FROM blobs WHERE org=?`, name); err != nil {
+			return err
+		}
+		existed = true
+		return nil
+	})
+	return existed, err
 }
 
 func (b *Backend) ListOrgs() ([]string, error) {
@@ -499,6 +702,12 @@ func (b *Backend) Tx(fn func(tx store.Backend) error) error {
 }
 
 func (b *Backend) Close() error {
+	// Stop the coalescing writer first so no batch is mid-commit on the writer
+	// pool when we close it (and so its goroutine exits). After this, submitting a
+	// write panics — the same don't-use-after-Close contract the Backend carries.
+	if b.cw != nil {
+		b.cw.close()
+	}
 	// db.Close releases statements prepared against the pool, but close them
 	// explicitly first for orderly teardown (and to release reader-pool
 	// statements before that pool closes below). Each is nil-safe to close.
