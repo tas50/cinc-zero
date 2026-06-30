@@ -82,3 +82,33 @@ func BenchmarkCheckin(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkHasOrg measures the org-existence probe that the API layer runs on
+// every request (a.org → HasOrg) before the actual data operation.
+func BenchmarkHasOrg(b *testing.B) {
+	be := benchBackend(b)
+	if err := be.CreateOrg("acme"); err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if ok, err := be.HasOrg("acme"); err != nil || !ok {
+			b.Fatalf("hasorg: ok=%v err=%v", ok, err)
+		}
+	}
+}
+
+// BenchmarkHasBlob measures the blob-existence probe that the cookbook upload
+// (sandbox) path runs for every file checksum a client offers.
+func BenchmarkHasBlob(b *testing.B) {
+	be := benchBackend(b)
+	if err := be.PutBlob("acme", "abc123", []byte("file contents")); err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if ok, err := be.HasBlob("acme", "abc123"); err != nil || !ok {
+			b.Fatalf("hasblob: ok=%v err=%v", ok, err)
+		}
+	}
+}

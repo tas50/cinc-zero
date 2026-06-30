@@ -78,6 +78,12 @@ type Backend struct {
 	stObjPut    *sql.Stmt // writer pool: upsert one object
 	stObjCreate *sql.Stmt // writer pool: insert-if-absent one object
 	stObjDelete *sql.Stmt // writer pool: delete one object
+
+	stHasOrg     *sql.Stmt // reader pool: org-existence probe (run on every request)
+	stBlobGet    *sql.Stmt // reader pool: SELECT one blob body
+	stBlobHas    *sql.Stmt // reader pool: blob-existence probe (cookbook upload)
+	stBlobPut    *sql.Stmt // writer pool: upsert one blob
+	stBlobDelete *sql.Stmt // writer pool: delete one blob
 }
 
 // Open opens (creating if needed) a SQLite database at path and applies migrations.
@@ -135,6 +141,12 @@ const (
 	sqlObjPut    = `INSERT INTO objects(org,collection,key,body) VALUES(?,?,?,?) ON CONFLICT(org,collection,key) DO UPDATE SET body=excluded.body`
 	sqlObjCreate = `INSERT INTO objects(org,collection,key,body) VALUES(?,?,?,?) ON CONFLICT(org,collection,key) DO NOTHING`
 	sqlObjDelete = `DELETE FROM objects WHERE org=? AND collection=? AND key=?`
+
+	sqlHasOrg     = `SELECT 1 FROM orgs WHERE name=?`
+	sqlBlobGet    = `SELECT content FROM blobs WHERE org=? AND checksum=?`
+	sqlBlobHas    = `SELECT 1 FROM blobs WHERE org=? AND checksum=?`
+	sqlBlobPut    = `INSERT INTO blobs(org,checksum,content) VALUES(?,?,?) ON CONFLICT(org,checksum) DO UPDATE SET content=excluded.content`
+	sqlBlobDelete = `DELETE FROM blobs WHERE org=? AND checksum=?`
 )
 
 // prepare compiles the objects-table hot-path statements once, after migration.
@@ -154,6 +166,21 @@ func (b *Backend) prepare() error {
 		return err
 	}
 	if b.stObjDelete, err = b.db.Prepare(sqlObjDelete); err != nil {
+		return err
+	}
+	if b.stHasOrg, err = b.rdb.Prepare(sqlHasOrg); err != nil {
+		return err
+	}
+	if b.stBlobGet, err = b.rdb.Prepare(sqlBlobGet); err != nil {
+		return err
+	}
+	if b.stBlobHas, err = b.rdb.Prepare(sqlBlobHas); err != nil {
+		return err
+	}
+	if b.stBlobPut, err = b.db.Prepare(sqlBlobPut); err != nil {
+		return err
+	}
+	if b.stBlobDelete, err = b.db.Prepare(sqlBlobDelete); err != nil {
 		return err
 	}
 	return nil
@@ -360,17 +387,13 @@ func (b *Backend) Collections(org string) ([]string, error) {
 }
 
 func (b *Backend) PutBlob(org, checksum string, data []byte) error {
-	_, err := b.q.Exec(
-		`INSERT INTO blobs(org,checksum,content) VALUES(?,?,?)
-		 ON CONFLICT(org,checksum) DO UPDATE SET content=excluded.content`,
-		org, checksum, data)
+	_, err := b.exec(b.stBlobPut, sqlBlobPut, org, checksum, data)
 	return err
 }
 
 func (b *Backend) Blob(org, checksum string) ([]byte, bool, error) {
 	var content []byte
-	err := b.rq.QueryRow(
-		`SELECT content FROM blobs WHERE org=? AND checksum=?`, org, checksum).Scan(&content)
+	err := b.queryRow(b.stBlobGet, sqlBlobGet, org, checksum).Scan(&content)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
 	}
@@ -382,8 +405,7 @@ func (b *Backend) Blob(org, checksum string) ([]byte, bool, error) {
 
 func (b *Backend) HasBlob(org, checksum string) (bool, error) {
 	var one int
-	err := b.rq.QueryRow(
-		`SELECT 1 FROM blobs WHERE org=? AND checksum=?`, org, checksum).Scan(&one)
+	err := b.queryRow(b.stBlobHas, sqlBlobHas, org, checksum).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -391,7 +413,7 @@ func (b *Backend) HasBlob(org, checksum string) (bool, error) {
 }
 
 func (b *Backend) DeleteBlob(org, checksum string) error {
-	_, err := b.q.Exec(`DELETE FROM blobs WHERE org=? AND checksum=?`, org, checksum)
+	_, err := b.exec(b.stBlobDelete, sqlBlobDelete, org, checksum)
 	return err
 }
 
@@ -450,7 +472,7 @@ func (b *Backend) ListOrgs() ([]string, error) {
 
 func (b *Backend) HasOrg(name string) (bool, error) {
 	var one int
-	err := b.rq.QueryRow(`SELECT 1 FROM orgs WHERE name=?`, name).Scan(&one)
+	err := b.queryRow(b.stHasOrg, sqlHasOrg, name).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -480,7 +502,10 @@ func (b *Backend) Close() error {
 	// db.Close releases statements prepared against the pool, but close them
 	// explicitly first for orderly teardown (and to release reader-pool
 	// statements before that pool closes below). Each is nil-safe to close.
-	for _, st := range []*sql.Stmt{b.stObjGet, b.stObjPut, b.stObjCreate, b.stObjDelete} {
+	for _, st := range []*sql.Stmt{
+		b.stObjGet, b.stObjPut, b.stObjCreate, b.stObjDelete,
+		b.stHasOrg, b.stBlobGet, b.stBlobHas, b.stBlobPut, b.stBlobDelete,
+	} {
 		if st != nil {
 			st.Close()
 		}
