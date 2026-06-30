@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"math"
 	"math/rand"
+	"net/http"
 	"sort"
 )
 
@@ -25,4 +28,37 @@ func selectStuck(names []string, frac float64, rng *rand.Rand) map[string]bool {
 		stuck[name] = true
 	}
 	return stuck
+}
+
+// discover reads the whole fleet from the server: list node names, then fetch
+// each node's full body. Nodes are returned sorted by name.
+func discover(c *client) ([]*node, error) {
+	body, status, err := c.do("GET", "/nodes", nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("list nodes: status %d", status)
+	}
+	var list map[string]string
+	if err := json.Unmarshal(body, &list); err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(list))
+	for name := range list {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	nodes := make([]*node, 0, len(names))
+	for _, name := range names {
+		nb, status, err := c.do("GET", "/nodes/"+name, nil)
+		if err != nil {
+			return nil, err
+		}
+		if status != http.StatusOK {
+			return nil, fmt.Errorf("get node %s: status %d", name, status)
+		}
+		nodes = append(nodes, &node{name: name, body: nb})
+	}
+	return nodes, nil
 }
